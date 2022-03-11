@@ -1,5 +1,6 @@
 use std::mem::size_of;
-use crate::util::{ByteConvertible, byte_slice_to_u16, byte_slice_to_u32};
+use std::net::{Ipv4Addr, Ipv6Addr};
+use crate::util::{ByteConvertible, byte_slice_to_u16};
 
 const MDNS_RESPONSE_FLAG: u16 = 0x8400;
 const MDNS_OFFSET_TOKEN: u8 = 0xC0;
@@ -125,8 +126,73 @@ impl ByteConvertible for Question {
 }
 
 
-#[derive(Clone)]
-pub struct Answer {
+#[derive(Clone, Debug)]
+pub enum RecordData {
+    // TODO Add missing record types
+    A(Ipv4Addr),
+    AAAA(Ipv6Addr),
+    Ptr(String),
+    TXT(Vec<String>),
+    SRV {
+        priority: u16,
+        weight: u16,
+        port: u16,
+        target: String
+    },
+    Raw(Vec<u8>)
+}
+
+impl RecordData {
+    pub fn from(rec_type: u16, buffer: &[u8]) -> Self {
+        // TODO Add enum to prevent use of magic numbers here
+        match rec_type {
+             1 => RecordData::A(Ipv4Addr::from(u32::from_be_bytes(buffer.try_into().unwrap()))),
+             2 => RecordData::AAAA(Ipv6Addr::from(u128::from_be_bytes(buffer.try_into().unwrap()))),
+            12 => RecordData::parse_ptr(buffer),
+            16 => RecordData::parse_txt(buffer),
+            33 => RecordData::parse_srv(buffer),
+            _  => RecordData::Raw(Vec::new())
+        }
+    }
+
+    // TODO Generally check where OFFSET_TOKEN can occure
+
+    fn parse_ptr(buffer: &[u8]) -> RecordData {
+        if buffer[buffer.len()-2] == MDNS_OFFSET_TOKEN {
+            // TODO Append pointed to name to the data (name compression)
+            RecordData::Ptr(String::from_utf8_lossy(&buffer[1..buffer.len()-2]).to_string())
+        } else {
+            RecordData::Ptr(String::from_utf8_lossy(&buffer[1..]).to_string())
+        }
+    }
+
+    fn parse_txt(buffer: &[u8]) -> RecordData {
+        let mut txt_store = Vec::<String>::new();
+        let mut idx = 0;
+        while idx < buffer.len() {
+            let txt_size = buffer[idx];
+            txt_store.push(String::from_utf8_lossy(&buffer[idx+1..idx+txt_size as usize+1]).to_string());
+            idx += txt_size as usize + 1;
+        }
+        RecordData::TXT(txt_store)
+    }
+
+    fn parse_srv(buffer: &[u8]) -> RecordData {
+        let priority = u16::from_be_bytes(buffer[0..2].try_into().unwrap());
+        let weight = u16::from_be_bytes(buffer[2..4].try_into().unwrap());
+        let port = u16::from_be_bytes(buffer[4..6].try_into().unwrap());
+        let target = if buffer[buffer.len()-2] == MDNS_OFFSET_TOKEN {
+            String::from_utf8_lossy(&buffer[7..buffer.len()-2]).to_string()
+        } else {
+            String::from_utf8_lossy(&buffer[7..]).to_string()
+        };
+        RecordData::SRV { priority, weight, port, target }
+    }
+}
+
+
+#[derive(Clone, Debug)]
+pub struct ResourceRecord {
     pub a_name: Vec<u8>,
     pub a_type: u16,
     pub a_class: u16,
@@ -134,9 +200,14 @@ pub struct Answer {
     pub data: Vec<u8>, // TODO Improve this (not store bytes but parsed data)
 }
 
-impl Answer {
+impl ResourceRecord {
     pub fn new() -> Self {
-        Answer { a_name: Vec::new(), a_type: 0, a_class: 0, time_to_live: 0, data: Vec::new() }
+        ResourceRecord { a_name: Vec::new(), a_type: 0, a_class: 0, time_to_live: 0, data: Vec::new() }
+    }
+
+    pub fn with(a_name: &str, a_type: u16, a_class: u16, ttl: u32, record: &ResourceRecord) -> Self {
+        // TODO Implement record parsing
+        ResourceRecord { a_name: a_name.as_bytes().to_vec(), a_type, a_class, time_to_live: ttl, data: Vec::new() }
     }
 
     pub fn get_name_as_string(&self) -> String {
@@ -146,9 +217,17 @@ impl Answer {
     pub fn set_name_from_string(&mut self, hostname: &str) {
         self.a_name = to_fqdn(hostname);
     }
+
+    pub fn get_data(&self) -> RecordData {
+        RecordData::from(self.a_type, &self.data)
+    }
+
+    // pub fn get_data_raw(&self) -> &[u8] {
+    //     &self.data
+    // }
 }
 
-impl ByteConvertible for Answer {
+impl ByteConvertible for ResourceRecord {
     fn byte_size(&self) -> usize {
             self.a_name.len() +
             size_of::<u16>() +
@@ -173,9 +252,7 @@ impl ByteConvertible for Answer {
 pub struct Packet {
     pub header: Header, // TODO Do not make this pub
     pub questions: Vec<Question>,
-    pub answers: Vec<Answer>,
-    // pub authorities: Vec<Authority>,
-    // pub additional: Vec<Additional>,
+    pub records: Vec<ResourceRecord>,
 }
 
 #[allow(dead_code)]
@@ -191,7 +268,7 @@ impl Packet {
                 add_count: 0,
             },
             questions: Vec::new(),
-            answers: Vec::new(),
+            records: Vec::new(),
         }
     }
 
@@ -206,12 +283,11 @@ impl Packet {
                 add_count: 0,
             },
             questions: vec![question.clone()],
-            answers: Vec::new(),
+            records: Vec::new(),
         }
     }
 
     pub fn from_network(buffer: &[u8]) -> Result<Self, DnsError> {
-        // TODO Make this work (check if it works)
         if buffer.len() < Header::SIZE {
             return Err(DnsError::with(""));
         }
@@ -221,8 +297,6 @@ impl Packet {
         packet.header = Header::from_network(&buffer[..Header::SIZE].try_into().unwrap());
 
         let mut buffer_idx = Header::SIZE;
-
-        println!("[DEBUG] {:?}", packet.header);
 
         // Parse questions from buffer
         for _ in 0..packet.header.ques_count {
@@ -246,15 +320,14 @@ impl Packet {
         }
 
         // Parse answers from buffer
-        // TODO Continue fixing this
-        for _ in 0..packet.header.ans_count {
-            let (a_name, name_len) = if buffer[buffer_idx] == MDNS_OFFSET_TOKEN || buffer[buffer_idx+1] == MDNS_UNKNOWN_TOKEN {
+        for _ in 0..packet.header.ans_count+packet.header.auth_count+packet.header.add_count {
+            let (a_name, name_len) = if buffer[buffer_idx] == MDNS_OFFSET_TOKEN || buffer[buffer_idx] == MDNS_UNKNOWN_TOKEN {
                 // TODO Check what to do here and how to implement parsing of compressed answers
-                println!("LEL");
-                (Vec::new(), 0)
+                println!("OFFSET_TOKEN");
+                (Vec::new(), 2)
             } else {
                 // Name set as fqdn
-                let (a_name, len) = from_fqdn(&buffer[buffer_idx..]);
+                let (_, len) = from_fqdn(&buffer[buffer_idx..]);
                 (buffer[buffer_idx..buffer_idx+len].to_vec(), len)
             };
             buffer_idx += name_len;
@@ -272,8 +345,9 @@ impl Packet {
             buffer_idx += 2;
 
             let data = Vec::from(&buffer[buffer_idx..buffer_idx+data_len as usize]);
+            buffer_idx += data_len as usize;
 
-            packet.answers.push(Answer { a_name, a_type, a_class, time_to_live, data });
+            packet.records.push(ResourceRecord { a_name, a_type, a_class, time_to_live, data });
         }
 
         Ok(packet)
@@ -288,13 +362,15 @@ impl Packet {
         self.header.id
     }
 
+    // TODO Implement data accessors correctly
+
     pub fn add_question(&mut self, question: Question) {
         self.questions.push(question);
         self.header.ques_count += 1;
     }
 
-    pub fn add_answer(&mut self, answer: Answer) {
-        self.answers.push(answer);
+    pub fn add_answer(&mut self, answer: ResourceRecord) {
+        self.records.push(answer);
         self.header.ans_count += 1;
     }
 
@@ -315,7 +391,7 @@ impl ByteConvertible for Packet {
         for ques in self.questions.iter() {
             size += ques.byte_size();
         }
-        for ans in self.answers.iter() {
+        for ans in self.records.iter() {
             size += ans.byte_size();
         }
         size
@@ -329,20 +405,20 @@ impl ByteConvertible for Packet {
             questions_bin_len += ques.byte_size();
         }
 
-        let mut answers_bin_len = 0;
-        for ans in self.answers.iter() {
-            answers_bin_len += ans.byte_size();
+        let mut records_bin_len = 0;
+        for ans in self.records.iter() {
+            records_bin_len += ans.byte_size();
         }
 
         // TODO Get binary length of auth and add records when implemented
 
-        let mut bin = Vec::with_capacity(header_bin_len + questions_bin_len + answers_bin_len);
+        let mut bin = Vec::with_capacity(header_bin_len + questions_bin_len + records_bin_len);
 
         bin.extend_from_slice(&self.header.to_bytes());
         for ques in self.questions.iter() {
             bin.extend_from_slice(&ques.to_bytes());
         }
-        for ans in self.answers.iter() {
+        for ans in self.records.iter() {
             bin.extend_from_slice(&ans.to_bytes());
         }
         // TODO Append auth and add records as binary when implemented

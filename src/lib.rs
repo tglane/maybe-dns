@@ -54,6 +54,11 @@ pub fn discovery(record_name: &str, delay: &Duration) -> Result<Vec<MdnsResponse
                 println!("Received {} bytes from {:?}", size, peer);
 
                 let res = MdnsResponse { peer , packet: dns::Packet::from_network(&response_buffer[..size])? };
+
+                for rec in res.packet.records.iter() {
+                    println!("[DEBUG] {:?}", rec.get_data());
+                }
+
                 responses.push(res);
             },
             Err(e) => println!("ERROR {:?}", e)
