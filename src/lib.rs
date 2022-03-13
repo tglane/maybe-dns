@@ -55,9 +55,9 @@ pub fn discovery(record_name: &str, delay: &Duration) -> Result<Vec<MdnsResponse
 
                 let res = MdnsResponse { peer , packet: dns::Packet::from_network(&response_buffer[..size])? };
 
-                for rec in res.packet.records.iter() {
-                    println!("[DEBUG] {:?}", rec.get_data());
-                }
+                // for rec in res.packet.records.iter() {
+                //     println!("[DEBUG] {:?}", rec.rdata);
+                // }
 
                 responses.push(res);
             },

@@ -2,9 +2,10 @@ use std::mem::size_of;
 use std::net::{Ipv4Addr, Ipv6Addr};
 use crate::util::{ByteConvertible, byte_slice_to_u16};
 
-const MDNS_RESPONSE_FLAG: u16 = 0x8400;
 const MDNS_OFFSET_TOKEN: u8 = 0xC0;
-const MDNS_UNKNOWN_TOKEN: u8 = 0xC1;
+
+const COMPRESSION_MASK: u8 = 0b1100_0000;
+const COMPRESSION_MASK_U16: u16 = 0b1100_0000_0000_0000;
 
 bitfield!{
     #[derive(Clone, Debug)]
@@ -47,17 +48,6 @@ impl Header {
             ans_count: u16::from_be_bytes(buffer[6..8].try_into().unwrap()),
             auth_count: u16::from_be_bytes(buffer[8..10].try_into().unwrap()),
             add_count: u16::from_be_bytes(buffer[10..12].try_into().unwrap()),
-        }
-    }
-
-    fn from_host(buffer: &[u8; size_of::<Header>()]) -> Self {
-        Header {
-            id: byte_slice_to_u16(&buffer[0..2]),
-            bitfield: DnsHeaderBitfield(byte_slice_to_u16(&buffer[2..4])),
-            ques_count: byte_slice_to_u16(&buffer[4..6]),
-            ans_count: byte_slice_to_u16(&buffer[6..8]),
-            auth_count: byte_slice_to_u16(&buffer[8..10]),
-            add_count: byte_slice_to_u16(&buffer[10..12]),
         }
     }
 }
@@ -129,6 +119,7 @@ impl ByteConvertible for Question {
 #[derive(Clone, Debug)]
 pub enum RecordData {
     // TODO Add missing record types
+    // TODO Use Vec<u8> to store fqdns unparsed(?)
     A(Ipv4Addr),
     AAAA(Ipv6Addr),
     Ptr(String),
@@ -143,7 +134,7 @@ pub enum RecordData {
 }
 
 impl RecordData {
-    pub fn from(rec_type: u16, buffer: &[u8]) -> Self {
+    fn from(rec_type: u16, buffer: &[u8]) -> Self {
         // TODO Add enum to prevent use of magic numbers here
         match rec_type {
              1 => RecordData::A(Ipv4Addr::from(u32::from_be_bytes(buffer.try_into().unwrap()))),
@@ -151,7 +142,7 @@ impl RecordData {
             12 => RecordData::parse_ptr(buffer),
             16 => RecordData::parse_txt(buffer),
             33 => RecordData::parse_srv(buffer),
-            _  => RecordData::Raw(Vec::new())
+            _  => RecordData::Raw(buffer.to_vec())
         }
     }
 
@@ -162,7 +153,7 @@ impl RecordData {
             // TODO Append pointed to name to the data (name compression)
             RecordData::Ptr(String::from_utf8_lossy(&buffer[1..buffer.len()-2]).to_string())
         } else {
-            RecordData::Ptr(String::from_utf8_lossy(&buffer[1..]).to_string())
+            RecordData::Ptr(from_fqdn(buffer).0)
         }
     }
 
@@ -182,11 +173,33 @@ impl RecordData {
         let weight = u16::from_be_bytes(buffer[2..4].try_into().unwrap());
         let port = u16::from_be_bytes(buffer[4..6].try_into().unwrap());
         let target = if buffer[buffer.len()-2] == MDNS_OFFSET_TOKEN {
+            // TODO Append pointed to name to the data (name compression)
             String::from_utf8_lossy(&buffer[7..buffer.len()-2]).to_string()
         } else {
-            String::from_utf8_lossy(&buffer[7..]).to_string()
+            from_fqdn(&buffer[6..buffer.len()]).0
         };
         RecordData::SRV { priority, weight, port, target }
+    }
+}
+
+impl ByteConvertible for RecordData {
+
+    // TODO Implement
+
+    fn byte_size(&self) -> usize {
+        match self {
+            RecordData::A(_) => 4,
+            RecordData::AAAA(_) => 16,
+            RecordData::SRV { ref priority, ref weight, ref port, ref target } => 0,
+            RecordData::Ptr(ref name) => 0,
+            RecordData::TXT(ref store) => store.iter().fold(0, |acc, elem| acc + elem.len()),
+            RecordData::Raw(ref buff) => buff.len(),
+            _ => 0
+        }
+    }
+
+    fn to_bytes(&self) -> Vec<u8> {
+        Vec::new()
     }
 }
 
@@ -197,17 +210,16 @@ pub struct ResourceRecord {
     pub a_type: u16,
     pub a_class: u16,
     pub time_to_live: u32,
-    pub data: Vec<u8>, // TODO Improve this (not store bytes but parsed data)
+    pub rdata: RecordData
 }
 
 impl ResourceRecord {
     pub fn new() -> Self {
-        ResourceRecord { a_name: Vec::new(), a_type: 0, a_class: 0, time_to_live: 0, data: Vec::new() }
+        ResourceRecord { a_name: Vec::new(), a_type: 0, a_class: 0, time_to_live: 0, rdata: RecordData::Raw(Vec::new()) }
     }
 
-    pub fn with(a_name: &str, a_type: u16, a_class: u16, ttl: u32, record: &ResourceRecord) -> Self {
-        // TODO Implement record parsing
-        ResourceRecord { a_name: a_name.as_bytes().to_vec(), a_type, a_class, time_to_live: ttl, data: Vec::new() }
+    pub fn with(a_name: &str, a_type: u16, a_class: u16, ttl: u32, rdata: RecordData) -> Self {
+        ResourceRecord { a_name: a_name.as_bytes().to_vec(), a_type, a_class, time_to_live: ttl, rdata }
     }
 
     pub fn get_name_as_string(&self) -> String {
@@ -218,13 +230,9 @@ impl ResourceRecord {
         self.a_name = to_fqdn(hostname);
     }
 
-    pub fn get_data(&self) -> RecordData {
-        RecordData::from(self.a_type, &self.data)
+    pub fn get_data_raw(&self) -> Vec<u8> {
+        self.rdata.to_bytes()
     }
-
-    // pub fn get_data_raw(&self) -> &[u8] {
-    //     &self.data
-    // }
 }
 
 impl ByteConvertible for ResourceRecord {
@@ -233,7 +241,7 @@ impl ByteConvertible for ResourceRecord {
             size_of::<u16>() +
             size_of::<u16>() +
             size_of::<u32>() +
-            self.data.len()
+            self.rdata.byte_size()
     }
 
     fn to_bytes(&self) -> Vec<u8> {
@@ -242,8 +250,8 @@ impl ByteConvertible for ResourceRecord {
         buffer.extend_from_slice(&u16::to_be_bytes(self.a_type));
         buffer.extend_from_slice(&u16::to_be_bytes(self.a_class));
         buffer.extend_from_slice(&u32::to_be_bytes(self.time_to_live));
-        buffer.extend_from_slice(&u16::to_be_bytes(self.data.len() as u16));
-        buffer.extend_from_slice(&self.data);
+        buffer.extend_from_slice(&u16::to_be_bytes(self.rdata.byte_size() as u16));
+        buffer.extend_from_slice(&self.rdata.to_bytes());
         buffer
     }
 }
@@ -300,9 +308,9 @@ impl Packet {
 
         // Parse questions from buffer
         for _ in 0..packet.header.ques_count {
-            let (q_name, name_len) = if buffer[buffer_idx] == MDNS_OFFSET_TOKEN || buffer[buffer_idx+1] == MDNS_UNKNOWN_TOKEN {
-                // TODO Check what to do here and how to implement parsing of compressed questions
-                (Vec::new(), 0)
+            let (q_name, name_len) = if buffer[buffer_idx] & COMPRESSION_MASK == COMPRESSION_MASK  {
+                let offset = (u16::from_be_bytes(buffer[buffer_idx..buffer_idx+2].try_into().unwrap()) & !COMPRESSION_MASK_U16) as usize;
+                (resolve_pointer(buffer, offset), 2)
             } else {
                 // Name set as fqdn
                 let (_, len) = from_fqdn(&buffer[buffer_idx..]);
@@ -320,11 +328,12 @@ impl Packet {
         }
 
         // Parse answers from buffer
+        println!("[LOL] # records: {}", packet.header.ans_count + packet.header.auth_count + packet.header.add_count);
         for _ in 0..packet.header.ans_count+packet.header.auth_count+packet.header.add_count {
-            let (a_name, name_len) = if buffer[buffer_idx] == MDNS_OFFSET_TOKEN || buffer[buffer_idx] == MDNS_UNKNOWN_TOKEN {
-                // TODO Check what to do here and how to implement parsing of compressed answers
-                println!("OFFSET_TOKEN");
-                (Vec::new(), 2)
+            // let (a_name, name_len) = if buffer[buffer_idx] == MDNS_OFFSET_TOKEN || buffer[buffer_idx] == MDNS_UNKNOWN_TOKEN {
+            let (a_name, name_len) = if buffer[buffer_idx] & COMPRESSION_MASK == COMPRESSION_MASK {
+                let offset = (u16::from_be_bytes(buffer[buffer_idx..buffer_idx+2].try_into().unwrap()) & !COMPRESSION_MASK_U16) as usize;
+                (resolve_pointer(buffer, offset), 2)
             } else {
                 // Name set as fqdn
                 let (_, len) = from_fqdn(&buffer[buffer_idx..]);
@@ -344,18 +353,20 @@ impl Packet {
             let data_len = u16::from_be_bytes(buffer[buffer_idx..buffer_idx+2].try_into().unwrap());
             buffer_idx += 2;
 
-            let data = Vec::from(&buffer[buffer_idx..buffer_idx+data_len as usize]);
+            // TODO Only resolve pointer in records that allow compression (use enum type)
+            let rdata = if a_type != 1 && a_type != 16 {
+                let resolved_buffer = resolve_pointers_in_range(&buffer[buffer_idx..buffer_idx+data_len as usize], buffer, buffer_idx);
+                RecordData::from(a_type, &resolved_buffer)
+            } else {
+                RecordData::from(a_type, &buffer[buffer_idx..buffer_idx+data_len as usize])
+            };
             buffer_idx += data_len as usize;
 
-            packet.records.push(ResourceRecord { a_name, a_type, a_class, time_to_live, data });
+            packet.records.push(ResourceRecord { a_name, a_type, a_class, time_to_live, rdata });
         }
 
+        println!("RET");
         Ok(packet)
-    }
-
-    pub fn from_host(buffer: &[u8]) -> Result<Self, DnsError> {
-        // TODO Implement
-        Ok(Packet::new())
     }
 
     pub fn id(&self) -> u16 {
@@ -369,20 +380,10 @@ impl Packet {
         self.header.ques_count += 1;
     }
 
-    pub fn add_answer(&mut self, answer: ResourceRecord) {
-        self.records.push(answer);
+    pub fn add_resource(&mut self, resource: ResourceRecord) {
+        self.records.push(resource);
         self.header.ans_count += 1;
     }
-
-    // pub fn add_authority(&mut self, authority: Authority) {
-    //     self.authorities.push(authority);
-    //     self.header.auth_count += 1;
-    // }
-
-    // pub fn add_additional(&mut self, additional: Additional) {
-    //     self.additionals.push(additional);
-    //     self.header.add_count += 1;
-    // }
 }
 
 impl ByteConvertible for Packet {
@@ -410,8 +411,6 @@ impl ByteConvertible for Packet {
             records_bin_len += ans.byte_size();
         }
 
-        // TODO Get binary length of auth and add records when implemented
-
         let mut bin = Vec::with_capacity(header_bin_len + questions_bin_len + records_bin_len);
 
         bin.extend_from_slice(&self.header.to_bytes());
@@ -421,7 +420,6 @@ impl ByteConvertible for Packet {
         for ans in self.records.iter() {
             bin.extend_from_slice(&ans.to_bytes());
         }
-        // TODO Append auth and add records as binary when implemented
 
         bin
     }
@@ -446,6 +444,36 @@ impl std::fmt::Display for DnsError {
 }
 
 
+fn resolve_pointers_in_range(range: &[u8], buffer: &[u8], start_in_buffer: usize) -> Vec<u8> {
+    let mut resolved_buffer = range.to_vec();
+    for (idx, byte) in range.iter().enumerate() {
+        if *byte == COMPRESSION_MASK {
+            let offset = (u16::from_be_bytes(buffer[start_in_buffer+idx..start_in_buffer+idx+2].try_into().unwrap()) & !COMPRESSION_MASK_U16) as usize;
+            let resolved_pointer = resolve_pointer(buffer, offset);
+            resolved_buffer.splice(idx..idx+2, resolved_pointer.iter().copied());
+        }
+    }
+    resolved_buffer
+}
+
+fn resolve_pointer(buffer: &[u8], idx: usize) -> Vec<u8> {
+    let len = buffer[idx] as usize;
+    let end_idx = idx + 1 + len;
+    let mut resolved = vec![len as u8; 1];
+    resolved.extend_from_slice(&buffer[idx+1..idx+1+len]);
+
+    if buffer[end_idx] == COMPRESSION_MASK {
+        // Block ends on another pointer
+        let nested_offset = (u16::from_be_bytes(buffer[end_idx..end_idx+2].try_into().unwrap()) & !COMPRESSION_MASK_U16) as usize;
+        resolved.extend_from_slice(&resolve_pointer(buffer, nested_offset));
+    } else if buffer[end_idx] != 0 {
+        // Block not finished (probably reading fqdn at this point)
+        resolved.extend_from_slice(&resolve_pointer(buffer, end_idx));
+    }
+
+    return resolved;
+}
+
 fn from_fqdn(buffer: &[u8]) -> (String, usize) {
     // Read a fully-qualified domain name (fqdn) and return it as a human readable string
     let mut pos = 0_usize;
@@ -453,16 +481,12 @@ fn from_fqdn(buffer: &[u8]) -> (String, usize) {
 
     loop {
         if pos >= buffer.len() {
-            // ERROR
-            return (String::new(), 0);
+            break;
         }
 
         let len = buffer[pos];
         pos += 1;
-        if pos + len as usize >= buffer.len() {
-            return (String::new(), 0);
-        }
-        if len == 0 {
+        if pos + len as usize > buffer.len() || len == 0 {
             break;
         }
 
@@ -470,7 +494,6 @@ fn from_fqdn(buffer: &[u8]) -> (String, usize) {
             result.push('.');
         }
         result.push_str(std::str::from_utf8(&buffer[pos..pos+len as usize]).unwrap());
-
         pos += len as usize;
     }
 
