@@ -22,9 +22,18 @@ fn test(query: &dns::Packet) {
     let ser = query.to_bytes();
     let des = dns::Packet::from_network(&ser).unwrap();
 
-    println!("[TEST] {:?} -> {:?}", query.header, des.header);
-    println!("[TEST] {:?} -> {:?}", query.questions[0], des.questions[0]);
+    // println!("[TEST] {:?} -> {:?}", query.header, des.header);
+    // println!("[TEST] {:?} -> {:?}", query.questions[0], des.questions[0]);
     // println!("[TEST] {}", query.questions[0].q_name);
+    for rec in query.records.iter() {
+        println!("[DEBUG] {:?}", rec.rdata);
+    }
+    println!("---------------------------------------------------------\n");
+    for rec in des.records.iter() {
+        println!("[DEBUG] {:?}", rec.rdata);
+    }
+    println!("=========================================================\n\n");
+
 }
 
 pub fn discovery(record_name: &str, delay: &Duration) -> Result<Vec<MdnsResponse>, dns::DnsError> {
@@ -35,9 +44,6 @@ pub fn discovery(record_name: &str, delay: &Duration) -> Result<Vec<MdnsResponse
     builder.reuse_address(true).unwrap();
     let sock = builder.bind("0.0.0.0:5353").unwrap();
     sock.set_read_timeout(Some(*delay)).unwrap();
-
-    // Test
-    // test(&dns_query);
 
     // Send binary and wait for answers
     sock.send_to(&dns_query.to_bytes(), format!("{}:{}", QUERY_IP, QUERY_PORT)).unwrap();
@@ -55,9 +61,8 @@ pub fn discovery(record_name: &str, delay: &Duration) -> Result<Vec<MdnsResponse
 
                 let res = MdnsResponse { peer , packet: dns::Packet::from_network(&response_buffer[..size])? };
 
-                // for rec in res.packet.records.iter() {
-                //     println!("[DEBUG] {:?}", rec.rdata);
-                // }
+                // Test parsing of larger packet
+                test(&res.packet);
 
                 responses.push(res);
             },
@@ -65,7 +70,6 @@ pub fn discovery(record_name: &str, delay: &Duration) -> Result<Vec<MdnsResponse
         }
     }
 
-    // println!("[RECEIVED] {:?}", responses[0].questions[0]);
     Ok(responses)
 }
 

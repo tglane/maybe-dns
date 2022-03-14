@@ -1,8 +1,6 @@
 use std::mem::size_of;
 use std::net::{Ipv4Addr, Ipv6Addr};
-use crate::util::{ByteConvertible, byte_slice_to_u16};
-
-const MDNS_OFFSET_TOKEN: u8 = 0xC0;
+use crate::util::ByteConvertible;
 
 const COMPRESSION_MASK: u8 = 0b1100_0000;
 const COMPRESSION_MASK_U16: u16 = 0b1100_0000_0000_0000;
@@ -119,7 +117,6 @@ impl ByteConvertible for Question {
 #[derive(Clone, Debug)]
 pub enum RecordData {
     // TODO Add missing record types
-    // TODO Use Vec<u8> to store fqdns unparsed(?)
     A(Ipv4Addr),
     AAAA(Ipv6Addr),
     Ptr(String),
@@ -137,24 +134,17 @@ impl RecordData {
     fn from(rec_type: u16, buffer: &[u8]) -> Self {
         // TODO Add enum to prevent use of magic numbers here
         match rec_type {
-             1 => RecordData::A(Ipv4Addr::from(u32::from_be_bytes(buffer.try_into().unwrap()))),
-             2 => RecordData::AAAA(Ipv6Addr::from(u128::from_be_bytes(buffer.try_into().unwrap()))),
+            1 => RecordData::A(Ipv4Addr::from(u32::from_be_bytes(buffer.try_into().unwrap()))),
+            2 => RecordData::AAAA(Ipv6Addr::from(u128::from_be_bytes(buffer.try_into().unwrap()))),
             12 => RecordData::parse_ptr(buffer),
             16 => RecordData::parse_txt(buffer),
             33 => RecordData::parse_srv(buffer),
-            _  => RecordData::Raw(buffer.to_vec())
+            _ => RecordData::Raw(buffer.to_vec())
         }
     }
 
-    // TODO Generally check where OFFSET_TOKEN can occure
-
     fn parse_ptr(buffer: &[u8]) -> RecordData {
-        if buffer[buffer.len()-2] == MDNS_OFFSET_TOKEN {
-            // TODO Append pointed to name to the data (name compression)
-            RecordData::Ptr(String::from_utf8_lossy(&buffer[1..buffer.len()-2]).to_string())
-        } else {
-            RecordData::Ptr(from_fqdn(buffer).0)
-        }
+        RecordData::Ptr(from_fqdn(buffer).0)
     }
 
     fn parse_txt(buffer: &[u8]) -> RecordData {
@@ -172,34 +162,46 @@ impl RecordData {
         let priority = u16::from_be_bytes(buffer[0..2].try_into().unwrap());
         let weight = u16::from_be_bytes(buffer[2..4].try_into().unwrap());
         let port = u16::from_be_bytes(buffer[4..6].try_into().unwrap());
-        let target = if buffer[buffer.len()-2] == MDNS_OFFSET_TOKEN {
-            // TODO Append pointed to name to the data (name compression)
-            String::from_utf8_lossy(&buffer[7..buffer.len()-2]).to_string()
-        } else {
-            from_fqdn(&buffer[6..buffer.len()]).0
-        };
+        let target = from_fqdn(&buffer[6..buffer.len()]).0;
         RecordData::SRV { priority, weight, port, target }
     }
 }
 
 impl ByteConvertible for RecordData {
-
-    // TODO Implement
-
     fn byte_size(&self) -> usize {
         match self {
             RecordData::A(_) => 4,
             RecordData::AAAA(_) => 16,
-            RecordData::SRV { ref priority, ref weight, ref port, ref target } => 0,
-            RecordData::Ptr(ref name) => 0,
-            RecordData::TXT(ref store) => store.iter().fold(0, |acc, elem| acc + elem.len()),
+            RecordData::Ptr(ref name) => name.len() + 2,
+            RecordData::TXT(ref store) => store.iter().fold(0, |acc, elem| acc + elem.len() + 1),
+            RecordData::SRV { priority: _, weight: _, port: _, ref target } => 2 + 2 + 2 + target.len() + 2,
             RecordData::Raw(ref buff) => buff.len(),
             _ => 0
         }
     }
 
     fn to_bytes(&self) -> Vec<u8> {
-        Vec::new()
+        let buff = match self {
+            RecordData::A(ref buffer) => buffer.octets().to_vec(),
+            RecordData::AAAA(ref buffer) => buffer.octets().to_vec(),
+            RecordData::Ptr(ref buffer) => to_fqdn(buffer),
+            RecordData::TXT(ref store) => store.iter().fold(Vec::new(), |mut buff, elem| {
+                let txt_bin = elem.as_bytes();
+                buff.push(txt_bin.len() as u8);
+                buff.extend_from_slice(txt_bin);
+                buff
+            }),
+            RecordData::SRV { ref priority, ref weight, ref port, ref target } => {
+                let mut buff = Vec::new();
+                buff.extend_from_slice(&u16::to_be_bytes(*priority));
+                buff.extend_from_slice(&u16::to_be_bytes(*weight));
+                buff.extend_from_slice(&u16::to_be_bytes(*port));
+                buff.extend_from_slice(&to_fqdn(target));
+                buff
+            },
+            _ => Vec::new()
+        };
+        buff
     }
 }
 
@@ -300,19 +302,19 @@ impl Packet {
             return Err(DnsError::with(""));
         }
 
-        // Check header information
         let mut packet = Packet::new();
-        packet.header = Header::from_network(&buffer[..Header::SIZE].try_into().unwrap());
 
+        packet.header = Header::from_network(&buffer[..Header::SIZE].try_into().unwrap());
         let mut buffer_idx = Header::SIZE;
 
         // Parse questions from buffer
         for _ in 0..packet.header.ques_count {
             let (q_name, name_len) = if buffer[buffer_idx] & COMPRESSION_MASK == COMPRESSION_MASK  {
+                // Name represented by pointer
                 let offset = (u16::from_be_bytes(buffer[buffer_idx..buffer_idx+2].try_into().unwrap()) & !COMPRESSION_MASK_U16) as usize;
                 (resolve_pointer(buffer, offset), 2)
             } else {
-                // Name set as fqdn
+                // Name represented by fqdn in place
                 let (_, len) = from_fqdn(&buffer[buffer_idx..]);
                 (buffer[buffer_idx..buffer_idx+len].to_vec(), len)
             };
@@ -328,14 +330,13 @@ impl Packet {
         }
 
         // Parse answers from buffer
-        println!("[LOL] # records: {}", packet.header.ans_count + packet.header.auth_count + packet.header.add_count);
         for _ in 0..packet.header.ans_count+packet.header.auth_count+packet.header.add_count {
-            // let (a_name, name_len) = if buffer[buffer_idx] == MDNS_OFFSET_TOKEN || buffer[buffer_idx] == MDNS_UNKNOWN_TOKEN {
             let (a_name, name_len) = if buffer[buffer_idx] & COMPRESSION_MASK == COMPRESSION_MASK {
+                // Name represented by pointer
                 let offset = (u16::from_be_bytes(buffer[buffer_idx..buffer_idx+2].try_into().unwrap()) & !COMPRESSION_MASK_U16) as usize;
                 (resolve_pointer(buffer, offset), 2)
             } else {
-                // Name set as fqdn
+                // Name represented by fqdn in place
                 let (_, len) = from_fqdn(&buffer[buffer_idx..]);
                 (buffer[buffer_idx..buffer_idx+len].to_vec(), len)
             };
@@ -365,7 +366,6 @@ impl Packet {
             packet.records.push(ResourceRecord { a_name, a_type, a_class, time_to_live, rdata });
         }
 
-        println!("RET");
         Ok(packet)
     }
 
@@ -469,9 +469,12 @@ fn resolve_pointer(buffer: &[u8], idx: usize) -> Vec<u8> {
     } else if buffer[end_idx] != 0 {
         // Block not finished (probably reading fqdn at this point)
         resolved.extend_from_slice(&resolve_pointer(buffer, end_idx));
+    } else if buffer[end_idx] == 0 {
+        // Append stop byte to resolved name
+        resolved.push(0);
     }
 
-    return resolved;
+    resolved
 }
 
 fn from_fqdn(buffer: &[u8]) -> (String, usize) {
@@ -515,7 +518,6 @@ fn to_fqdn(name: &str) -> Vec<u8> {
             lock += 1;
         }
     }
-    out.push('\0' as u8);
-
+    out.push(0);
     out
 }
