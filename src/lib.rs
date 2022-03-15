@@ -38,7 +38,7 @@ fn test(query: &dns::Packet) {
 
 pub fn discovery(record_name: &str, delay: &Duration) -> Result<Vec<MdnsResponse>, dns::DnsError> {
     // Prepare DNS query
-    let dns_query = dns::Packet::with_question(1234, &dns::Question::with(record_name, 12, 1));
+    let dns_query = dns::Packet::with_question(1234, &dns::Question::with(record_name, dns::RecordType::PTR, dns::RecordClass::IN));
 
     let builder = UdpBuilder::new_v4().unwrap();
     builder.reuse_address(true).unwrap();

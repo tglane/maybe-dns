@@ -71,21 +71,17 @@ impl ByteConvertible for Header {
 #[derive(Clone, Debug)]
 pub struct Question {
     pub q_name: Vec<u8>,
-    pub q_type: u16,
-    pub q_class: u16,
+    pub q_type: RecordType,
+    pub q_class: RecordClass,
 }
 
 impl Question {
     pub fn new() -> Self {
-        Question { q_name: Vec::new(), q_type: 0, q_class: 0 }
+        Question { q_name: Vec::new(), q_type: RecordType::UNDEFINED, q_class: RecordClass::IN }
     }
 
-    pub fn with(q_name: &str, q_type: u16, q_class: u16) -> Self {
-        Question {
-            q_name: to_fqdn(q_name),
-            q_type,
-            q_class
-        }
+    pub fn with(q_name: &str, q_type: RecordType, q_class: RecordClass) -> Self {
+        Question { q_name: to_fqdn(q_name), q_type, q_class }
     }
 
     pub fn get_name_as_string(&self) -> String {
@@ -107,9 +103,70 @@ impl ByteConvertible for Question {
     fn to_bytes(&self) -> Vec<u8> {
         let mut buffer = Vec::new();
         buffer.extend_from_slice(&self.q_name);
-        buffer.extend_from_slice(&u16::to_be_bytes(self.q_type));
-        buffer.extend_from_slice(&u16::to_be_bytes(self.q_class));
+        buffer.extend_from_slice(&u16::to_be_bytes(self.q_type as u16));
+        buffer.extend_from_slice(&u16::to_be_bytes(self.q_class as u16));
         buffer
+    }
+}
+
+
+#[derive(Copy, Clone, Debug)]
+pub enum RecordClass {
+    IN = 1,
+    CS = 2,
+    CH = 3,
+    HS = 4,
+}
+
+impl RecordClass {
+    fn from(number: u16) -> Self {
+        match number {
+            2 => RecordClass::CS,
+            3 => RecordClass::CH,
+            4 => RecordClass::HS,
+            _ => RecordClass::IN,
+        }
+    }
+}
+
+
+#[derive(Copy, Clone, Debug)]
+pub enum RecordType {
+    UNDEFINED = 0,
+    A = 1,
+    NS = 2,
+    CNAME = 5,
+    PTR = 12,
+    TXT = 16,
+    AAAA = 28,
+    SRV = 33,
+}
+
+impl RecordType {
+    fn from(number: u16) -> Self {
+        match number {
+             1 => RecordType::A,
+             2 => RecordType::NS,
+             5 => RecordType::CNAME,
+            12 => RecordType::PTR,
+            16 => RecordType::TXT,
+            28 => RecordType::AAAA,
+            33 => RecordType::SRV,
+             _ => RecordType::UNDEFINED
+        }
+    }
+
+    fn compression_allowed(&self) -> bool {
+        match self {
+            RecordType::A => false,
+            RecordType::NS => true,
+            RecordType::CNAME => true,
+            RecordType::PTR => true,
+            RecordType::TXT => true,
+            RecordType::AAAA => false,
+            RecordType::SRV => true,
+            RecordType::UNDEFINED => false
+        }
     }
 }
 
@@ -118,9 +175,11 @@ impl ByteConvertible for Question {
 pub enum RecordData {
     // TODO Add missing record types
     A(Ipv4Addr),
-    AAAA(Ipv6Addr),
-    Ptr(String),
+    NS(String),
+    CNAME(String),
+    PTR(String),
     TXT(Vec<String>),
+    AAAA(Ipv6Addr),
     SRV {
         priority: u16,
         weight: u16,
@@ -131,20 +190,17 @@ pub enum RecordData {
 }
 
 impl RecordData {
-    fn from(rec_type: u16, buffer: &[u8]) -> Self {
-        // TODO Add enum to prevent use of magic numbers here
+    fn from(rec_type: RecordType, buffer: &[u8]) -> Self {
         match rec_type {
-            1 => RecordData::A(Ipv4Addr::from(u32::from_be_bytes(buffer.try_into().unwrap()))),
-            2 => RecordData::AAAA(Ipv6Addr::from(u128::from_be_bytes(buffer.try_into().unwrap()))),
-            12 => RecordData::parse_ptr(buffer),
-            16 => RecordData::parse_txt(buffer),
-            33 => RecordData::parse_srv(buffer),
+            RecordType::A => RecordData::A(Ipv4Addr::from(u32::from_be_bytes(buffer.try_into().unwrap()))),
+            RecordType::NS => RecordData::NS(from_fqdn(buffer).0),
+            RecordType::CNAME => RecordData::CNAME(from_fqdn(buffer).0),
+            RecordType::PTR => RecordData::PTR(from_fqdn(buffer).0),
+            RecordType::TXT => RecordData::parse_txt(buffer),
+            RecordType::AAAA => RecordData::AAAA(Ipv6Addr::from(u128::from_be_bytes(buffer.try_into().unwrap()))),
+            RecordType::SRV => RecordData::parse_srv(buffer),
             _ => RecordData::Raw(buffer.to_vec())
         }
-    }
-
-    fn parse_ptr(buffer: &[u8]) -> RecordData {
-        RecordData::Ptr(from_fqdn(buffer).0)
     }
 
     fn parse_txt(buffer: &[u8]) -> RecordData {
@@ -171,9 +227,11 @@ impl ByteConvertible for RecordData {
     fn byte_size(&self) -> usize {
         match self {
             RecordData::A(_) => 4,
-            RecordData::AAAA(_) => 16,
-            RecordData::Ptr(ref name) => name.len() + 2,
+            RecordData::NS(ref name) => name.len() + 2,
+            RecordData::CNAME(ref name) => name.len() + 2,
+            RecordData::PTR(ref name) => name.len() + 2,
             RecordData::TXT(ref store) => store.iter().fold(0, |acc, elem| acc + elem.len() + 1),
+            RecordData::AAAA(_) => 16,
             RecordData::SRV { priority: _, weight: _, port: _, ref target } => 2 + 2 + 2 + target.len() + 2,
             RecordData::Raw(ref buff) => buff.len(),
             _ => 0
@@ -183,14 +241,16 @@ impl ByteConvertible for RecordData {
     fn to_bytes(&self) -> Vec<u8> {
         let buff = match self {
             RecordData::A(ref buffer) => buffer.octets().to_vec(),
-            RecordData::AAAA(ref buffer) => buffer.octets().to_vec(),
-            RecordData::Ptr(ref buffer) => to_fqdn(buffer),
+            RecordData::NS(ref name) => to_fqdn(name),
+            RecordData::CNAME(ref name) => to_fqdn(name),
+            RecordData::PTR(ref name) => to_fqdn(name),
             RecordData::TXT(ref store) => store.iter().fold(Vec::new(), |mut buff, elem| {
                 let txt_bin = elem.as_bytes();
                 buff.push(txt_bin.len() as u8);
                 buff.extend_from_slice(txt_bin);
                 buff
             }),
+            RecordData::AAAA(ref buffer) => buffer.octets().to_vec(),
             RecordData::SRV { ref priority, ref weight, ref port, ref target } => {
                 let mut buff = Vec::new();
                 buff.extend_from_slice(&u16::to_be_bytes(*priority));
@@ -209,18 +269,18 @@ impl ByteConvertible for RecordData {
 #[derive(Clone, Debug)]
 pub struct ResourceRecord {
     pub a_name: Vec<u8>,
-    pub a_type: u16,
-    pub a_class: u16,
+    pub a_type: RecordType,
+    pub a_class: RecordClass,
     pub time_to_live: u32,
     pub rdata: RecordData
 }
 
 impl ResourceRecord {
     pub fn new() -> Self {
-        ResourceRecord { a_name: Vec::new(), a_type: 0, a_class: 0, time_to_live: 0, rdata: RecordData::Raw(Vec::new()) }
+        ResourceRecord { a_name: Vec::new(), a_type: RecordType::UNDEFINED, a_class: RecordClass::IN, time_to_live: 0, rdata: RecordData::Raw(Vec::new()) }
     }
 
-    pub fn with(a_name: &str, a_type: u16, a_class: u16, ttl: u32, rdata: RecordData) -> Self {
+    pub fn with(a_name: &str, a_type: RecordType, a_class: RecordClass, ttl: u32, rdata: RecordData) -> Self {
         ResourceRecord { a_name: a_name.as_bytes().to_vec(), a_type, a_class, time_to_live: ttl, rdata }
     }
 
@@ -249,8 +309,8 @@ impl ByteConvertible for ResourceRecord {
     fn to_bytes(&self) -> Vec<u8> {
         let mut buffer = Vec::new();
         buffer.extend_from_slice(&self.a_name);
-        buffer.extend_from_slice(&u16::to_be_bytes(self.a_type));
-        buffer.extend_from_slice(&u16::to_be_bytes(self.a_class));
+        buffer.extend_from_slice(&u16::to_be_bytes(self.a_type as u16));
+        buffer.extend_from_slice(&u16::to_be_bytes(self.a_class as u16));
         buffer.extend_from_slice(&u32::to_be_bytes(self.time_to_live));
         buffer.extend_from_slice(&u16::to_be_bytes(self.rdata.byte_size() as u16));
         buffer.extend_from_slice(&self.rdata.to_bytes());
@@ -320,10 +380,10 @@ impl Packet {
             };
             buffer_idx += name_len;
 
-            let q_type = u16::from_be_bytes(buffer[buffer_idx..buffer_idx+2].try_into().unwrap());
+            let q_type = RecordType::from(u16::from_be_bytes(buffer[buffer_idx..buffer_idx+2].try_into().unwrap()));
             buffer_idx += 2;
 
-            let q_class = u16::from_be_bytes(buffer[buffer_idx..buffer_idx+2].try_into().unwrap());
+            let q_class = RecordClass::from(u16::from_be_bytes(buffer[buffer_idx..buffer_idx+2].try_into().unwrap()));
             buffer_idx += 2;
 
             packet.questions.push(Question { q_name, q_type, q_class });
@@ -342,10 +402,10 @@ impl Packet {
             };
             buffer_idx += name_len;
 
-            let a_type = u16::from_be_bytes(buffer[buffer_idx..buffer_idx+2].try_into().unwrap());
+            let a_type = RecordType::from(u16::from_be_bytes(buffer[buffer_idx..buffer_idx+2].try_into().unwrap()));
             buffer_idx += 2;
 
-            let a_class = u16::from_be_bytes(buffer[buffer_idx..buffer_idx+2].try_into().unwrap());
+            let a_class = RecordClass::from(u16::from_be_bytes(buffer[buffer_idx..buffer_idx+2].try_into().unwrap()));
             buffer_idx += 2;
 
             let time_to_live = u32::from_be_bytes(buffer[buffer_idx..buffer_idx+4].try_into().unwrap());
@@ -354,8 +414,7 @@ impl Packet {
             let data_len = u16::from_be_bytes(buffer[buffer_idx..buffer_idx+2].try_into().unwrap());
             buffer_idx += 2;
 
-            // TODO Only resolve pointer in records that allow compression (use enum type)
-            let rdata = if a_type != 1 && a_type != 16 {
+            let rdata = if a_type.compression_allowed() {
                 let resolved_buffer = resolve_pointers_in_range(&buffer[buffer_idx..buffer_idx+data_len as usize], buffer, buffer_idx);
                 RecordData::from(a_type, &resolved_buffer)
             } else {
