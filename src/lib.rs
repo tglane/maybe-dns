@@ -1,5 +1,5 @@
-mod dns;
-mod util;
+pub mod dns;
+pub mod util;
 
 use std::net::SocketAddr;
 use std::time::{Instant, Duration};
