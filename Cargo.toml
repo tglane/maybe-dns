@@ -1,7 +1,12 @@
 [package]
-name = "rust-mdns"
+name = "maybe-mdns"
 version = "0.1.0"
+authors = ["Timo Glane <timo.glane@gmail.com>"]
 edition = "2021"
+description = "Library to parse and create DNS packets and use MDNS for network discovery"
+license = "MIT"
+keywords = ["dns", "mdns", "parser"]
+categories = ["network-programming", "parsing", "parser-implementations", "web-programming"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
