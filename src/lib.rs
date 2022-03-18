@@ -22,15 +22,13 @@ fn test(query: &dns::Packet) {
     let ser = query.to_bytes();
     let des = dns::Packet::from_network(&ser).unwrap();
 
-    // println!("[TEST] {:?} -> {:?}", query.header, des.header);
-    // println!("[TEST] {:?} -> {:?}", query.questions[0], des.questions[0]);
-    // println!("[TEST] {}", query.questions[0].q_name);
+    println!("[HEADER] {:?} -> {:?}", query.header, des.header);
     for rec in query.records.iter() {
-        println!("[DEBUG] {:?}", rec.rdata);
+        println!("[RECORD] {:?}", rec.rdata);
     }
     println!("---------------------------------------------------------\n");
     for rec in des.records.iter() {
-        println!("[DEBUG] {:?}", rec.rdata);
+        println!("[Check RECORD] {:?}", rec.rdata);
     }
     println!("=========================================================\n\n");
 
@@ -59,12 +57,12 @@ pub fn discovery(record_name: &str, delay: &Duration) -> Result<Vec<MdnsResponse
             Ok((size, peer)) => {
                 println!("Received {} bytes from {:?}", size, peer);
 
-                let res = MdnsResponse { peer , packet: dns::Packet::from_network(&response_buffer[..size])? };
+                let packet = dns::Packet::from_network(&response_buffer[..size])?;
 
                 // Test parsing of larger packet
-                test(&res.packet);
+                test(&packet);
 
-                responses.push(res);
+                responses.push(MdnsResponse { peer, packet });
             },
             Err(e) => println!("ERROR {:?}", e)
         }

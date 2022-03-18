@@ -1,6 +1,7 @@
 use std::mem::size_of;
 
 use crate::util::ByteConvertible;
+use super::error::DnsError;
 
 bitfield!{
     #[derive(Clone, Debug)]
@@ -35,15 +36,15 @@ pub struct Header {
 impl Header {
     pub(super) const SIZE: usize = size_of::<Self>();
 
-    pub(super) fn from_network(buffer: &[u8; size_of::<Header>()]) -> Self {
-        Header {
-            id: u16::from_be_bytes(buffer[0..2].try_into().unwrap()),
-            bitfield: DnsHeaderBitfield(u16::from_be_bytes(buffer[2..4].try_into().unwrap())),
-            ques_count: u16::from_be_bytes(buffer[4..6].try_into().unwrap()),
-            ans_count: u16::from_be_bytes(buffer[6..8].try_into().unwrap()),
-            auth_count: u16::from_be_bytes(buffer[8..10].try_into().unwrap()),
-            add_count: u16::from_be_bytes(buffer[10..12].try_into().unwrap()),
-        }
+    pub(super) fn from_network(buffer: &[u8; size_of::<Header>()]) -> Result<Self, DnsError> {
+        Ok(Header {
+            id: u16::from_be_bytes(buffer[0..2].try_into()?),
+            bitfield: DnsHeaderBitfield(u16::from_be_bytes(buffer[2..4].try_into()?)),
+            ques_count: u16::from_be_bytes(buffer[4..6].try_into()?),
+            ans_count: u16::from_be_bytes(buffer[6..8].try_into()?),
+            auth_count: u16::from_be_bytes(buffer[8..10].try_into()?),
+            add_count: u16::from_be_bytes(buffer[10..12].try_into()?),
+        })
     }
 
     // TODO Add accessor for struct fields

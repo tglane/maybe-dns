@@ -46,20 +46,20 @@ impl Packet {
 
     pub fn from_network(buffer: &[u8]) -> Result<Self, DnsError> {
         if buffer.len() < Header::SIZE {
-            return Err(DnsError::with(""));
+            return Err(DnsError::InvalidPacketData);
         }
 
         let mut packet = Packet::new();
 
-        packet.header = Header::from_network(&buffer[..Header::SIZE].try_into().unwrap());
+        packet.header = Header::from_network(&buffer[..Header::SIZE].try_into()?)?;
         let mut buffer_idx = Header::SIZE;
 
         // Parse questions from buffer
         for _ in 0..packet.header.ques_count {
             let (q_name, name_len) = if buffer[buffer_idx] & COMPRESSION_MASK == COMPRESSION_MASK  {
                 // Name represented by pointer
-                let offset = (u16::from_be_bytes(buffer[buffer_idx..buffer_idx+2].try_into().unwrap()) & !COMPRESSION_MASK_U16) as usize;
-                (resolve_pointer(buffer, offset), 2)
+                let offset = (u16::from_be_bytes(buffer[buffer_idx..buffer_idx+2].try_into()?) & !COMPRESSION_MASK_U16) as usize;
+                (resolve_pointer(buffer, offset)?, 2)
             } else {
                 // Name represented by fqdn in place
                 let (_, len) = from_fqdn(&buffer[buffer_idx..]);
@@ -67,10 +67,10 @@ impl Packet {
             };
             buffer_idx += name_len;
 
-            let q_type = RecordType::from(u16::from_be_bytes(buffer[buffer_idx..buffer_idx+2].try_into().unwrap()));
+            let q_type = RecordType::from(u16::from_be_bytes(buffer[buffer_idx..buffer_idx+2].try_into()?))?;
             buffer_idx += 2;
 
-            let q_class = RecordClass::from(u16::from_be_bytes(buffer[buffer_idx..buffer_idx+2].try_into().unwrap()));
+            let q_class = RecordClass::from(u16::from_be_bytes(buffer[buffer_idx..buffer_idx+2].try_into()?));
             buffer_idx += 2;
 
             packet.questions.push(Question { q_name, q_type, q_class });
@@ -80,8 +80,8 @@ impl Packet {
         for _ in 0..packet.header.ans_count+packet.header.auth_count+packet.header.add_count {
             let (a_name, name_len) = if buffer[buffer_idx] & COMPRESSION_MASK == COMPRESSION_MASK {
                 // Name represented by pointer
-                let offset = (u16::from_be_bytes(buffer[buffer_idx..buffer_idx+2].try_into().unwrap()) & !COMPRESSION_MASK_U16) as usize;
-                (resolve_pointer(buffer, offset), 2)
+                let offset = (u16::from_be_bytes(buffer[buffer_idx..buffer_idx+2].try_into()?) & !COMPRESSION_MASK_U16) as usize;
+                (resolve_pointer(buffer, offset)?, 2)
             } else {
                 // Name represented by fqdn in place
                 let (_, len) = from_fqdn(&buffer[buffer_idx..]);
@@ -89,23 +89,23 @@ impl Packet {
             };
             buffer_idx += name_len;
 
-            let a_type = RecordType::from(u16::from_be_bytes(buffer[buffer_idx..buffer_idx+2].try_into().unwrap()));
+            let a_type = RecordType::from(u16::from_be_bytes(buffer[buffer_idx..buffer_idx+2].try_into()?))?;
             buffer_idx += 2;
 
-            let a_class = RecordClass::from(u16::from_be_bytes(buffer[buffer_idx..buffer_idx+2].try_into().unwrap()));
+            let a_class = RecordClass::from(u16::from_be_bytes(buffer[buffer_idx..buffer_idx+2].try_into()?));
             buffer_idx += 2;
 
-            let time_to_live = u32::from_be_bytes(buffer[buffer_idx..buffer_idx+4].try_into().unwrap());
+            let time_to_live = u32::from_be_bytes(buffer[buffer_idx..buffer_idx+4].try_into()?);
             buffer_idx += 4;
 
-            let data_len = u16::from_be_bytes(buffer[buffer_idx..buffer_idx+2].try_into().unwrap());
+            let data_len = u16::from_be_bytes(buffer[buffer_idx..buffer_idx+2].try_into()?);
             buffer_idx += 2;
 
             let rdata = if a_type.compression_allowed() {
-                let resolved_buffer = resolve_pointers_in_range(&buffer[buffer_idx..buffer_idx+data_len as usize], buffer, buffer_idx);
-                RecordData::from(a_type, &resolved_buffer)
+                let resolved_buffer = resolve_pointers_in_range(&buffer[buffer_idx..buffer_idx+data_len as usize], buffer, buffer_idx)?;
+                RecordData::from(a_type, &resolved_buffer)?
             } else {
-                RecordData::from(a_type, &buffer[buffer_idx..buffer_idx+data_len as usize])
+                RecordData::from(a_type, &buffer[buffer_idx..buffer_idx+data_len as usize])?
             };
             buffer_idx += data_len as usize;
 
@@ -118,8 +118,6 @@ impl Packet {
     pub fn id(&self) -> u16 {
         self.header.id
     }
-
-    // TODO Implement data accessors correctly
 
     pub fn add_question(&mut self, question: Question) {
         self.questions.push(question);

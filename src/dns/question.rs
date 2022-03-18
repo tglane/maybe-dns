@@ -12,10 +12,6 @@ pub struct Question {
 }
 
 impl Question {
-    pub fn new() -> Self {
-        Question { q_name: Vec::new(), q_type: RecordType::UNDEFINED, q_class: RecordClass::IN }
-    }
-
     pub fn with(q_name: &str, q_type: RecordType, q_class: RecordClass) -> Self {
         Question { q_name: to_fqdn(q_name), q_type, q_class }
     }

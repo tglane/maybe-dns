@@ -1,7 +1,9 @@
 use std::mem::size_of;
+use std::array::TryFromSliceError;
 use std::net::{Ipv4Addr, Ipv6Addr};
 
 use crate::util::ByteConvertible;
+use super::error::DnsError;
 use super::util::{to_fqdn, from_fqdn};
 
 #[derive(Copy, Clone, Debug)]
@@ -10,15 +12,17 @@ pub enum RecordClass {
     CS = 2,
     CH = 3,
     HS = 4,
+    Unassigned,
 }
 
 impl RecordClass {
     pub fn from(number: u16) -> Self {
         match number {
+            1 => RecordClass::IN,
             2 => RecordClass::CS,
             3 => RecordClass::CH,
             4 => RecordClass::HS,
-            _ => RecordClass::IN,
+            _ => RecordClass::Unassigned,
         }
     }
 }
@@ -26,7 +30,6 @@ impl RecordClass {
 
 #[derive(Copy, Clone, Debug)]
 pub enum RecordType {
-    UNDEFINED = 0,
     A = 1,
     NS = 2,
     CNAME = 5,
@@ -43,22 +46,22 @@ pub enum RecordType {
 }
 
 impl RecordType {
-    pub fn from(number: u16) -> Self {
+    pub fn from(number: u16) -> Result<Self, DnsError> {
         match number {
-             1 => RecordType::A,
-             2 => RecordType::NS,
-             5 => RecordType::CNAME,
-             6 => RecordType::SOA,
-            10 => RecordType::NULL,
-            11 => RecordType::WKS,
-            12 => RecordType::PTR,
-            13 => RecordType::HINFO,
-            14 => RecordType::MINFO,
-            15 => RecordType::MX,
-            16 => RecordType::TXT,
-            28 => RecordType::AAAA,
-            33 => RecordType::SRV,
-             _ => RecordType::UNDEFINED
+             1 => Ok(RecordType::A),
+             2 => Ok(RecordType::NS),
+             5 => Ok(RecordType::CNAME),
+             6 => Ok(RecordType::SOA),
+            10 => Ok(RecordType::NULL),
+            11 => Ok(RecordType::WKS),
+            12 => Ok(RecordType::PTR),
+            13 => Ok(RecordType::HINFO),
+            14 => Ok(RecordType::MINFO),
+            15 => Ok(RecordType::MX),
+            16 => Ok(RecordType::TXT),
+            28 => Ok(RecordType::AAAA),
+            33 => Ok(RecordType::SRV),
+             _ => Err(DnsError::InvalidType(number)),
         }
     }
 
@@ -77,7 +80,6 @@ impl RecordType {
             RecordType::TXT => true,
             RecordType::AAAA => false,
             RecordType::SRV => true,
-            RecordType::UNDEFINED => false
         }
     }
 }
@@ -124,65 +126,68 @@ pub enum RecordData {
         port: u16,
         target: String,
     },
-    Raw(Vec<u8>)
 }
 
 impl RecordData {
-    pub fn from(rec_type: RecordType, buffer: &[u8]) -> Self {
-        match rec_type {
-            RecordType::A => RecordData::A(Ipv4Addr::from(u32::from_be_bytes(buffer.try_into().unwrap()))),
+    pub fn from(rec_type: RecordType, buffer: &[u8]) -> Result<Self, DnsError> {
+        Ok(match rec_type {
+            RecordType::A => RecordData::A(Ipv4Addr::from(u32::from_be_bytes(buffer.try_into()?))),
             RecordType::NS => RecordData::NS(from_fqdn(buffer).0),
             RecordType::CNAME => RecordData::CNAME(from_fqdn(buffer).0),
-            RecordType::SOA => RecordData::parse_soa(buffer),
+            RecordType::SOA => RecordData::parse_soa(buffer)?,
             RecordType::NULL => RecordData::NULL(buffer.to_vec()),
-            RecordType::WKS => RecordData::parse_wks(buffer),
+            RecordType::WKS => RecordData::parse_wks(buffer)?,
             RecordType::PTR => RecordData::PTR(from_fqdn(buffer).0),
-            RecordType::HINFO => RecordData::parse_hinfo(buffer),
-            RecordType::MINFO => RecordData::parse_minfo(buffer),
-            RecordType::MX => RecordData::parse_mx(buffer),
+            RecordType::HINFO => RecordData::parse_hinfo(buffer)?,
+            RecordType::MINFO => RecordData::parse_minfo(buffer)?,
+            RecordType::MX => RecordData::parse_mx(buffer)?,
             RecordType::TXT => RecordData::parse_txt(buffer),
-            RecordType::AAAA => RecordData::AAAA(Ipv6Addr::from(u128::from_be_bytes(buffer.try_into().unwrap()))),
-            RecordType::SRV => RecordData::parse_srv(buffer),
-            _ => RecordData::Raw(buffer.to_vec())
-        }
+            RecordType::AAAA => RecordData::AAAA(Ipv6Addr::from(u128::from_be_bytes(buffer.try_into()?))),
+            RecordType::SRV => RecordData::parse_srv(buffer)?,
+        })
     }
 
-    fn parse_soa(buffer: &[u8]) -> Self {
+    fn parse_soa(buffer: &[u8]) -> Result<Self, TryFromSliceError> {
         let (mname, idx_advanced) = from_fqdn(buffer);
         let (rname, idx_advanced) = from_fqdn(&buffer[idx_advanced..]);
-        let serial = u32::from_be_bytes(buffer[idx_advanced..idx_advanced+4].try_into().unwrap());
-        let refresh = u32::from_be_bytes(buffer[idx_advanced+4..idx_advanced+8].try_into().unwrap());
-        let retry = u32::from_be_bytes(buffer[idx_advanced+8..idx_advanced+12].try_into().unwrap());
-        let expire = u32::from_be_bytes(buffer[idx_advanced+12..idx_advanced+16].try_into().unwrap());
-        let minimum = u32::from_be_bytes(buffer[idx_advanced+16..idx_advanced+20].try_into().unwrap());
-        RecordData::SOA { mname, rname, serial, refresh, retry, expire, minimum }
+        let serial = u32::from_be_bytes(buffer[idx_advanced..idx_advanced+4].try_into()?);
+        let refresh = u32::from_be_bytes(buffer[idx_advanced+4..idx_advanced+8].try_into()?);
+        let retry = u32::from_be_bytes(buffer[idx_advanced+8..idx_advanced+12].try_into()?);
+        let expire = u32::from_be_bytes(buffer[idx_advanced+12..idx_advanced+16].try_into()?);
+        let minimum = u32::from_be_bytes(buffer[idx_advanced+16..idx_advanced+20].try_into()?);
+
+        Ok(RecordData::SOA { mname, rname, serial, refresh, retry, expire, minimum })
     }
 
-    fn parse_wks(buffer: &[u8]) -> Self {
-        let address = u32::from_be_bytes(buffer[0..2].try_into().unwrap());
+    fn parse_wks(buffer: &[u8]) -> Result<Self, TryFromSliceError> {
+        let address = u32::from_be_bytes(buffer[0..2].try_into()?);
         let protocol = buffer[2];
         let bitmap = buffer[3..].to_vec();
-        RecordData::WKS { address, protocol, bitmap }
+
+        Ok(RecordData::WKS { address, protocol, bitmap })
     }
 
-    fn parse_hinfo(buffer: &[u8]) -> Self {
+    fn parse_hinfo(buffer: &[u8]) -> Result<Self, DnsError> {
         let cpu_len = buffer[0] as usize;
         let cpu = buffer[1..cpu_len].to_vec();
         let os_len = buffer[cpu_len+ 1] as usize;
         let os = buffer[cpu_len+2..cpu_len+2+os_len].to_vec();
-        RecordData::HINFO { cpu, os }
+
+        Ok(RecordData::HINFO { cpu, os })
     }
 
-    fn parse_minfo(buffer: &[u8]) -> Self {
+    fn parse_minfo(buffer: &[u8]) -> Result<Self, DnsError> {
         let (rmailbx, idx_advanced) = from_fqdn(buffer);
         let (emailbx, _) = from_fqdn(&buffer[idx_advanced..]);
-        RecordData::MINFO { rmailbx, emailbx }
+
+        Ok(RecordData::MINFO { rmailbx, emailbx })
     }
 
-    fn parse_mx(buffer: &[u8]) -> Self {
-        let preference = u16::from_be_bytes(buffer[0..2].try_into().unwrap());
+    fn parse_mx(buffer: &[u8]) -> Result<Self, TryFromSliceError> {
+        let preference = u16::from_be_bytes(buffer[0..2].try_into()?);
         let exchange = from_fqdn(&buffer[2..]).0;
-        RecordData::MX { preference, exchange }
+
+        Ok(RecordData::MX { preference, exchange })
     }
 
     fn parse_txt(buffer: &[u8]) -> Self {
@@ -196,12 +201,13 @@ impl RecordData {
         RecordData::TXT(txt_store)
     }
 
-    fn parse_srv(buffer: &[u8]) -> Self {
-        let priority = u16::from_be_bytes(buffer[0..2].try_into().unwrap());
-        let weight = u16::from_be_bytes(buffer[2..4].try_into().unwrap());
-        let port = u16::from_be_bytes(buffer[4..6].try_into().unwrap());
+    fn parse_srv(buffer: &[u8]) -> Result<Self, TryFromSliceError> {
+        let priority = u16::from_be_bytes(buffer[0..2].try_into()?);
+        let weight = u16::from_be_bytes(buffer[2..4].try_into()?);
+        let port = u16::from_be_bytes(buffer[4..6].try_into()?);
         let target = from_fqdn(&buffer[6..buffer.len()]).0;
-        RecordData::SRV { priority, weight, port, target }
+
+        Ok(RecordData::SRV { priority, weight, port, target })
     }
 }
 
@@ -223,12 +229,11 @@ impl ByteConvertible for RecordData {
             RecordData::TXT(ref store) => store.iter().fold(0, |acc, elem| acc + elem.len() + 1),
             RecordData::AAAA(_) => 16,
             RecordData::SRV { priority: _, weight: _, port: _, ref target } => 2 + 2 + 2 + target.len() + 2,
-            RecordData::Raw(ref buff) => buff.len()
         }
     }
 
     fn to_bytes(&self) -> Vec<u8> {
-        let buff = match self {
+        match self {
             RecordData::A(ref buffer) => buffer.octets().to_vec(),
             RecordData::NS(ref name) => to_fqdn(&name),
             RecordData::CNAME(ref name) => to_fqdn(&name),
@@ -286,9 +291,7 @@ impl ByteConvertible for RecordData {
                 buff.extend_from_slice(&to_fqdn(&target));
                 buff
             },
-            RecordData::Raw(ref buff) => buff.clone()
-        };
-        buff
+        }
     }
 }
 
@@ -303,10 +306,6 @@ pub struct ResourceRecord {
 }
 
 impl ResourceRecord {
-    pub fn new() -> Self {
-        ResourceRecord { a_name: Vec::new(), a_type: RecordType::UNDEFINED, a_class: RecordClass::IN, time_to_live: 0, rdata: RecordData::Raw(Vec::new()) }
-    }
-
     pub fn with(a_name: &str, a_type: RecordType, a_class: RecordClass, ttl: u32, rdata: RecordData) -> Self {
         ResourceRecord { a_name: a_name.as_bytes().to_vec(), a_type, a_class, time_to_live: ttl, rdata }
     }
