@@ -60,7 +60,8 @@ pub fn discovery(record_name: &str, delay: &Duration) -> Result<Vec<MdnsResponse
                 let packet = dns::Packet::from_network(&response_buffer[..size])?;
 
                 // Test parsing of larger packet
-                test(&packet);
+                // test(&packet);
+                println!("[DEBUG] {:?}", packet);
 
                 responses.push(MdnsResponse { peer, packet });
             },
@@ -84,7 +85,7 @@ mod tests {
             Ok(res_vec) => {
                 println!("Found somethin! -- Number of responses: {}", res_vec.len());
             }
-            Err(_) => println!("Found nothing..."),
+            Err(err) => println!("Found nothing... {:?}", err),
         }
     }
 }

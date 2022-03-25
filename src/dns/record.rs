@@ -3,6 +3,7 @@ use std::array::TryFromSliceError;
 use std::net::{Ipv4Addr, Ipv6Addr};
 
 use crate::util::ByteConvertible;
+use super::fqdn::FQDN;
 use super::error::DnsError;
 use super::util::{to_fqdn, from_fqdn};
 
@@ -17,6 +18,7 @@ pub enum RecordClass {
 
 impl RecordClass {
     pub fn from(number: u16) -> Self {
+        let number = number & 0b01111111_11111111;
         match number {
             1 => RecordClass::IN,
             2 => RecordClass::CS,
@@ -298,24 +300,16 @@ impl ByteConvertible for RecordData {
 
 #[derive(Clone, Debug)]
 pub struct ResourceRecord {
-    pub a_name: Vec<u8>,
+    pub a_name: FQDN,
     pub a_type: RecordType,
     pub a_class: RecordClass,
     pub time_to_live: u32,
-    pub rdata: RecordData
+    pub rdata: RecordData,
 }
 
 impl ResourceRecord {
     pub fn with(a_name: &str, a_type: RecordType, a_class: RecordClass, ttl: u32, rdata: RecordData) -> Self {
-        ResourceRecord { a_name: a_name.as_bytes().to_vec(), a_type, a_class, time_to_live: ttl, rdata }
-    }
-
-    pub fn get_name_as_string(&self) -> String {
-        from_fqdn(&self.a_name).0
-    }
-
-    pub fn set_name_from_string(&mut self, hostname: &str) {
-        self.a_name = to_fqdn(hostname);
+        ResourceRecord { a_name: FQDN::with(a_name), a_type, a_class, time_to_live: ttl, rdata }
     }
 
     pub fn get_data_raw(&self) -> Vec<u8> {
@@ -325,7 +319,7 @@ impl ResourceRecord {
 
 impl ByteConvertible for ResourceRecord {
     fn byte_size(&self) -> usize {
-            self.a_name.len() +
+            self.a_name.byte_size() +
             size_of::<u16>() +
             size_of::<u16>() +
             size_of::<u32>() +
@@ -333,8 +327,8 @@ impl ByteConvertible for ResourceRecord {
     }
 
     fn to_bytes(&self) -> Vec<u8> {
-        let mut buffer = Vec::new();
-        buffer.extend_from_slice(&self.a_name);
+        let mut buffer = Vec::with_capacity(self.byte_size());
+        buffer.extend_from_slice(&self.a_name.to_bytes());
         buffer.extend_from_slice(&u16::to_be_bytes(self.a_type as u16));
         buffer.extend_from_slice(&u16::to_be_bytes(self.a_class as u16));
         buffer.extend_from_slice(&u32::to_be_bytes(self.time_to_live));

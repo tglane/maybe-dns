@@ -2,17 +2,17 @@ use crate::util::ByteConvertible;
 use super::header::{DnsHeaderBitfield, Header};
 use super::question::Question;
 use super::record::{RecordClass, RecordType, RecordData, ResourceRecord};
+use super::fqdn::FQDN;
 use super::error::DnsError;
-use super::util::{resolve_pointers_in_range, resolve_pointer, from_fqdn, COMPRESSION_MASK, COMPRESSION_MASK_U16};
+use super::util::{resolve_pointers_in_range, resolve_pointer, COMPRESSION_MASK, COMPRESSION_MASK_U16};
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Packet {
     pub header: Header,
     pub questions: Vec<Question>,
     pub records: Vec<ResourceRecord>,
 }
 
-#[allow(dead_code)]
 impl Packet {
     pub fn new() -> Self {
         Packet {
@@ -62,8 +62,9 @@ impl Packet {
                 (resolve_pointer(buffer, offset)?, 2)
             } else {
                 // Name represented by fqdn in place
-                let (_, len) = from_fqdn(&buffer[buffer_idx..]);
-                (buffer[buffer_idx..buffer_idx+len].to_vec(), len)
+                let fqdn = FQDN::from(&buffer[buffer_idx..]);
+                let len = fqdn.byte_size();
+                (fqdn, len)
             };
             buffer_idx += name_len;
 
@@ -84,8 +85,9 @@ impl Packet {
                 (resolve_pointer(buffer, offset)?, 2)
             } else {
                 // Name represented by fqdn in place
-                let (_, len) = from_fqdn(&buffer[buffer_idx..]);
-                (buffer[buffer_idx..buffer_idx+len].to_vec(), len)
+                let fqdn = FQDN::from(&buffer[buffer_idx..]);
+                let len = fqdn.byte_size();
+                (fqdn, len)
             };
             buffer_idx += name_len;
 
