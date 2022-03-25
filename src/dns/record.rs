@@ -90,11 +90,11 @@ impl RecordType {
 #[derive(Clone, Debug)]
 pub enum RecordData {
     A(Ipv4Addr),
-    NS(String),
-    CNAME(String),
+    NS(FQDN),
+    CNAME(FQDN),
     SOA {
-        mname: String,
-        rname: String,
+        mname: FQDN,
+        rname: FQDN,
         serial: u32,
         refresh: u32,
         retry: u32,
@@ -113,12 +113,12 @@ pub enum RecordData {
         os: Vec<u8>,
     },
     MINFO {
-        rmailbx: String,
-        emailbx: String,
+        rmailbx: FQDN,
+        emailbx: FQDN,
     },
     MX {
         preference: u16,
-        exchange: String,
+        exchange: FQDN,
     },
     TXT(Vec<String>),
     AAAA(Ipv6Addr),
@@ -126,7 +126,7 @@ pub enum RecordData {
         priority: u16,
         weight: u16,
         port: u16,
-        target: String,
+        target: FQDN,
     },
 }
 
@@ -134,8 +134,8 @@ impl RecordData {
     pub fn from(rec_type: RecordType, buffer: &[u8]) -> Result<Self, DnsError> {
         Ok(match rec_type {
             RecordType::A => RecordData::A(Ipv4Addr::from(u32::from_be_bytes(buffer.try_into()?))),
-            RecordType::NS => RecordData::NS(from_fqdn(buffer).0),
-            RecordType::CNAME => RecordData::CNAME(from_fqdn(buffer).0),
+            RecordType::NS => RecordData::NS(FQDN::from(buffer)),
+            RecordType::CNAME => RecordData::CNAME(FQDN::from(buffer)),
             RecordType::SOA => RecordData::parse_soa(buffer)?,
             RecordType::NULL => RecordData::NULL(buffer.to_vec()),
             RecordType::WKS => RecordData::parse_wks(buffer)?,
@@ -150,8 +150,9 @@ impl RecordData {
     }
 
     fn parse_soa(buffer: &[u8]) -> Result<Self, TryFromSliceError> {
-        let (mname, idx_advanced) = from_fqdn(buffer);
-        let (rname, idx_advanced) = from_fqdn(&buffer[idx_advanced..]);
+        let mname = FQDN::from(buffer);
+        let rname = FQDN::from(&buffer[mname.byte_size()..]);
+        let idx_advanced = rname.len();
         let serial = u32::from_be_bytes(buffer[idx_advanced..idx_advanced+4].try_into()?);
         let refresh = u32::from_be_bytes(buffer[idx_advanced+4..idx_advanced+8].try_into()?);
         let retry = u32::from_be_bytes(buffer[idx_advanced+8..idx_advanced+12].try_into()?);
@@ -179,15 +180,15 @@ impl RecordData {
     }
 
     fn parse_minfo(buffer: &[u8]) -> Result<Self, DnsError> {
-        let (rmailbx, idx_advanced) = from_fqdn(buffer);
-        let (emailbx, _) = from_fqdn(&buffer[idx_advanced..]);
+        let rmailbx = FQDN::from(buffer);
+        let emailbx = FQDN::from(&buffer[rmailbx.byte_size()..]);
 
         Ok(RecordData::MINFO { rmailbx, emailbx })
     }
 
     fn parse_mx(buffer: &[u8]) -> Result<Self, TryFromSliceError> {
         let preference = u16::from_be_bytes(buffer[0..2].try_into()?);
-        let exchange = from_fqdn(&buffer[2..]).0;
+        let exchange = FQDN::from(&buffer[2..]);
 
         Ok(RecordData::MX { preference, exchange })
     }
@@ -207,7 +208,7 @@ impl RecordData {
         let priority = u16::from_be_bytes(buffer[0..2].try_into()?);
         let weight = u16::from_be_bytes(buffer[2..4].try_into()?);
         let port = u16::from_be_bytes(buffer[4..6].try_into()?);
-        let target = from_fqdn(&buffer[6..buffer.len()]).0;
+        let target = FQDN::from(&buffer[6..buffer.len()]);
 
         Ok(RecordData::SRV { priority, weight, port, target })
     }
@@ -217,8 +218,8 @@ impl ByteConvertible for RecordData {
     fn byte_size(&self) -> usize {
         match self {
             RecordData::A(_) => 4,
-            RecordData::NS(ref name) => name.len() + 2,
-            RecordData::CNAME(ref name) => name.len() + 2,
+            RecordData::NS(ref name) => name.byte_size(),
+            RecordData::CNAME(ref name) => name.byte_size(),
             RecordData::SOA { ref mname, ref rname, serial: _, refresh: _, retry: _, expire: _, minimum: _ } => {
                 mname.len() + 2 + rname.len() + 2 + 4 + 4 + 4 + 4 + 4
             },
@@ -237,11 +238,12 @@ impl ByteConvertible for RecordData {
     fn to_bytes(&self) -> Vec<u8> {
         match self {
             RecordData::A(ref buffer) => buffer.octets().to_vec(),
-            RecordData::NS(ref name) => to_fqdn(&name),
-            RecordData::CNAME(ref name) => to_fqdn(&name),
+            RecordData::NS(ref name) => name.to_bytes(),
+            RecordData::CNAME(ref name) => name.to_bytes(),
             RecordData::SOA { ref mname, ref rname, ref serial, ref refresh, ref retry, ref expire, ref minimum  } => {
-                let mut buffer = to_fqdn(&mname);
-                buffer.extend_from_slice(&to_fqdn(&rname));
+                let mut buffer = Vec::with_capacity(mname.byte_size() + rname.byte_size() + 64);
+                buffer.extend_from_slice(&mname.to_bytes());
+                buffer.extend_from_slice(&rname.to_bytes());
                 buffer.extend_from_slice(&u32::to_be_bytes(*serial));
                 buffer.extend_from_slice(&u32::to_be_bytes(*refresh));
                 buffer.extend_from_slice(&u32::to_be_bytes(*retry));
@@ -267,15 +269,15 @@ impl ByteConvertible for RecordData {
                 buffer
             }
             RecordData::MINFO { ref rmailbx, ref emailbx } => {
-                let mut buffer = Vec::with_capacity(rmailbx.len() + 2 + emailbx.len() + 2);
-                buffer.extend_from_slice(&to_fqdn(&rmailbx));
-                buffer.extend_from_slice(&to_fqdn(&emailbx));
+                let mut buffer = Vec::with_capacity(rmailbx.byte_size() + emailbx.byte_size());
+                buffer.extend_from_slice(&rmailbx.to_bytes());
+                buffer.extend_from_slice(&emailbx.to_bytes());
                 buffer
             }
             RecordData::MX { ref preference, ref exchange } => {
-                let mut buffer = Vec::with_capacity(2 + exchange.len() + 2);
+                let mut buffer = Vec::with_capacity(exchange.byte_size() + 2);
                 buffer.extend_from_slice(&u16::to_be_bytes(*preference));
-                buffer.extend_from_slice(&to_fqdn(&exchange));
+                buffer.extend_from_slice(&exchange.to_bytes());
                 buffer
             },
             RecordData::TXT(ref store) => store.iter().fold(Vec::new(), |mut buff, elem| {
@@ -286,11 +288,11 @@ impl ByteConvertible for RecordData {
             }),
             RecordData::AAAA(ref buffer) => buffer.octets().to_vec(),
             RecordData::SRV { ref priority, ref weight, ref port, ref target } => {
-                let mut buff = Vec::new();
+                let mut buff = Vec::with_capacity(6 + target.byte_size());
                 buff.extend_from_slice(&u16::to_be_bytes(*priority));
                 buff.extend_from_slice(&u16::to_be_bytes(*weight));
                 buff.extend_from_slice(&u16::to_be_bytes(*port));
-                buff.extend_from_slice(&to_fqdn(&target));
+                buff.extend_from_slice(&target.to_bytes());
                 buff
             },
         }

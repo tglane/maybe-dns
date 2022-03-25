@@ -32,6 +32,11 @@ fn test(query: &dns::Packet) {
     }
     println!("=========================================================\n\n");
 
+    let des_ser = des.to_bytes();
+    assert_eq!(ser.len(), des_ser.len());
+    for idx in 0..des_ser.len() {
+        assert_eq!(ser[idx], des_ser[idx]);
+    }
 }
 
 pub fn discovery(record_name: &str, delay: &Duration) -> Result<Vec<MdnsResponse>, dns::DnsError> {
@@ -60,8 +65,7 @@ pub fn discovery(record_name: &str, delay: &Duration) -> Result<Vec<MdnsResponse
                 let packet = dns::Packet::from_network(&response_buffer[..size])?;
 
                 // Test parsing of larger packet
-                // test(&packet);
-                println!("[DEBUG] {:?}", packet);
+                test(&packet);
 
                 responses.push(MdnsResponse { peer, packet });
             },
