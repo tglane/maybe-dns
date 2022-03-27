@@ -1,10 +1,11 @@
 use crate::util::ByteConvertible;
+use super::{COMPRESSION_MASK, COMPRESSION_MASK_U16};
 use super::header::{DnsHeaderBitfield, Header};
 use super::question::Question;
 use super::record::{RecordClass, RecordType, RecordData, ResourceRecord};
 use super::fqdn::FQDN;
 use super::error::DnsError;
-use super::util::{resolve_pointers_in_range, resolve_pointer, COMPRESSION_MASK, COMPRESSION_MASK_U16};
+use super::util::{resolve_pointers_in_range, resolve_pointer};
 
 #[derive(Clone, Debug)]
 pub struct Packet {
@@ -90,6 +91,7 @@ impl Packet {
                 (fqdn, len)
             };
             buffer_idx += name_len;
+            // println!("[DEBUG] {:?}", &buffer[buffer_idx-10..buffer_idx+10]);
 
             let a_type = RecordType::from(u16::from_be_bytes(buffer[buffer_idx..buffer_idx+2].try_into()?))?;
             buffer_idx += 2;
@@ -130,10 +132,10 @@ impl Packet {
         self.records.push(resource);
         self.header.ans_count += 1;
     }
-}
-
-impl ByteConvertible for Packet {
-    fn byte_size(&self) -> usize {
+// }
+//
+// impl ByteConvertible for Packet {
+    pub fn byte_size(&self) -> usize {
         let mut size = Header::SIZE;
         for ques in self.questions.iter() {
             size += ques.byte_size();
@@ -144,7 +146,7 @@ impl ByteConvertible for Packet {
         size
     }
 
-    fn to_bytes(&self) -> Vec<u8> {
+    pub fn to_bytes(&self) -> Vec<u8> {
         let header_bin_len = self.header.byte_size();
 
         let mut questions_bin_len = 0;
@@ -165,6 +167,21 @@ impl ByteConvertible for Packet {
         }
         for ans in self.records.iter() {
             bin.extend_from_slice(&ans.to_bytes());
+        }
+
+        bin
+    }
+
+    pub fn to_bytes_compressed(&self) -> Vec<u8> {
+        let mut used_fqdn = std::collections::HashMap::<u64, usize>::new();
+
+        let mut bin = self.header.to_bytes();
+
+        for ques in self.questions.iter() {
+            bin.extend_from_slice(&ques.to_bytes_compressed(&mut used_fqdn, bin.len()));
+        }
+        for ans in self.records.iter() {
+            bin.extend_from_slice(&ans.to_bytes_compressed(&mut used_fqdn, bin.len()));
         }
 
         bin

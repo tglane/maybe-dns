@@ -5,7 +5,6 @@ use std::net::{Ipv4Addr, Ipv6Addr};
 use crate::util::ByteConvertible;
 use super::fqdn::FQDN;
 use super::error::DnsError;
-use super::util::{to_fqdn, from_fqdn};
 
 #[derive(Copy, Clone, Debug)]
 pub enum RecordClass {
@@ -107,7 +106,7 @@ pub enum RecordData {
         protocol: u8,
         bitmap: Vec<u8>
     },
-    PTR(String),
+    PTR(FQDN),
     HINFO {
         cpu: Vec<u8>,
         os: Vec<u8>,
@@ -139,7 +138,7 @@ impl RecordData {
             RecordType::SOA => RecordData::parse_soa(buffer)?,
             RecordType::NULL => RecordData::NULL(buffer.to_vec()),
             RecordType::WKS => RecordData::parse_wks(buffer)?,
-            RecordType::PTR => RecordData::PTR(from_fqdn(buffer).0),
+            RecordType::PTR => RecordData::PTR(FQDN::from(buffer)),
             RecordType::HINFO => RecordData::parse_hinfo(buffer)?,
             RecordType::MINFO => RecordData::parse_minfo(buffer)?,
             RecordType::MX => RecordData::parse_mx(buffer)?,
@@ -225,7 +224,7 @@ impl ByteConvertible for RecordData {
             },
             RecordData::NULL(ref buffer) => buffer.len(),
             RecordData::WKS { address: _, protocol: _, ref bitmap } => 4 + 1 + bitmap.len(),
-            RecordData::PTR(ref name) => name.len() + 2,
+            RecordData::PTR(ref name) => name.byte_size(),
             RecordData::HINFO { ref cpu, ref os } => 2 + cpu.len() + os.len(),
             RecordData::MINFO { ref rmailbx, ref emailbx } => rmailbx.len() + 2 + emailbx.len() + 2,
             RecordData::MX { preference: _, ref exchange } => 2 + exchange.len() + 2,
@@ -259,7 +258,7 @@ impl ByteConvertible for RecordData {
                 buffer.extend_from_slice(&bitmap);
                 buffer
             },
-            RecordData::PTR(ref name) => to_fqdn(name),
+            RecordData::PTR(ref name) => name.to_bytes(),
             RecordData::HINFO { ref cpu, ref os } => {
                 let mut buffer = Vec::with_capacity(2 + cpu.len() + os.len());
                 buffer.push(cpu.len() as u8);
@@ -293,6 +292,69 @@ impl ByteConvertible for RecordData {
                 buff.extend_from_slice(&u16::to_be_bytes(*weight));
                 buff.extend_from_slice(&u16::to_be_bytes(*port));
                 buff.extend_from_slice(&target.to_bytes());
+                buff
+            },
+        }
+    }
+
+    fn to_bytes_compressed(&self, names: &mut std::collections::HashMap<u64, usize>, outer_off: usize) -> Vec<u8> {
+        match self {
+            RecordData::A(ref buffer) => buffer.octets().to_vec(),
+            RecordData::NS(ref name) => name.to_bytes_compressed(names, outer_off),
+            RecordData::CNAME(ref name) => name.to_bytes_compressed(names, outer_off),
+            RecordData::SOA { ref mname, ref rname, ref serial, ref refresh, ref retry, ref expire, ref minimum  } => {
+                let mut buffer = Vec::with_capacity(mname.byte_size() + rname.byte_size() + 64);
+                buffer.extend_from_slice(&mname.to_bytes_compressed(names, outer_off));
+                buffer.extend_from_slice(&rname.to_bytes_compressed(names, outer_off + buffer.len()));
+                buffer.extend_from_slice(&u32::to_be_bytes(*serial));
+                buffer.extend_from_slice(&u32::to_be_bytes(*refresh));
+                buffer.extend_from_slice(&u32::to_be_bytes(*retry));
+                buffer.extend_from_slice(&u32::to_be_bytes(*expire));
+                buffer.extend_from_slice(&u32::to_be_bytes(*minimum));
+                buffer
+            },
+            RecordData::NULL(ref buffer) => buffer.clone(),
+            RecordData::WKS { ref address, ref protocol, ref bitmap } => {
+                let mut buffer = Vec::with_capacity(4 + 1 + bitmap.len());
+                buffer.extend_from_slice(&u32::to_be_bytes(*address));
+                buffer.extend_from_slice(&u8::to_be_bytes(*protocol));
+                buffer.extend_from_slice(&bitmap);
+                buffer
+            },
+            RecordData::PTR(ref name) => name.to_bytes_compressed(names, outer_off),
+            RecordData::HINFO { ref cpu, ref os } => {
+                let mut buffer = Vec::with_capacity(2 + cpu.len() + os.len());
+                buffer.push(cpu.len() as u8);
+                buffer.extend_from_slice(&cpu);
+                buffer.push(os.len() as u8);
+                buffer.extend_from_slice(&os);
+                buffer
+            }
+            RecordData::MINFO { ref rmailbx, ref emailbx } => {
+                let mut buffer = Vec::with_capacity(rmailbx.byte_size() + emailbx.byte_size());
+                buffer.extend_from_slice(&rmailbx.to_bytes_compressed(names, outer_off));
+                buffer.extend_from_slice(&emailbx.to_bytes_compressed(names, outer_off + buffer.len()));
+                buffer
+            }
+            RecordData::MX { ref preference, ref exchange } => {
+                let mut buffer = Vec::with_capacity(exchange.byte_size() + 2);
+                buffer.extend_from_slice(&u16::to_be_bytes(*preference));
+                buffer.extend_from_slice(&exchange.to_bytes_compressed(names, outer_off));
+                buffer
+            },
+            RecordData::TXT(ref store) => store.iter().fold(Vec::new(), |mut buff, elem| {
+                let txt_bin = elem.as_bytes();
+                buff.push(txt_bin.len() as u8);
+                buff.extend_from_slice(txt_bin);
+                buff
+            }),
+            RecordData::AAAA(ref buffer) => buffer.octets().to_vec(),
+            RecordData::SRV { ref priority, ref weight, ref port, ref target } => {
+                let mut buff = Vec::with_capacity(6 + target.byte_size());
+                buff.extend_from_slice(&u16::to_be_bytes(*priority));
+                buff.extend_from_slice(&u16::to_be_bytes(*weight));
+                buff.extend_from_slice(&u16::to_be_bytes(*port));
+                buff.extend_from_slice(&target.to_bytes_compressed(names, outer_off));
                 buff
             },
         }
@@ -336,6 +398,22 @@ impl ByteConvertible for ResourceRecord {
         buffer.extend_from_slice(&u32::to_be_bytes(self.time_to_live));
         buffer.extend_from_slice(&u16::to_be_bytes(self.rdata.byte_size() as u16));
         buffer.extend_from_slice(&self.rdata.to_bytes());
+        buffer
+    }
+
+    fn to_bytes_compressed(&self, names: &mut std::collections::HashMap<u64, usize>, offset: usize) -> Vec<u8> {
+        let mut buffer = Vec::new();
+
+        buffer.extend_from_slice(&self.a_name.to_bytes_compressed(names, offset));
+        buffer.extend_from_slice(&u16::to_be_bytes(self.a_type as u16));
+        buffer.extend_from_slice(&u16::to_be_bytes(self.a_class as u16));
+        buffer.extend_from_slice(&u32::to_be_bytes(self.time_to_live));
+
+        let compressed_rdata = self.rdata.to_bytes_compressed(names, offset + buffer.len() + 2);
+
+        buffer.extend_from_slice(&u16::to_be_bytes(compressed_rdata.len() as u16));
+        buffer.extend_from_slice(&compressed_rdata);
+
         buffer
     }
 }

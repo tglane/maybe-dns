@@ -5,8 +5,6 @@ use std::net::SocketAddr;
 use std::time::{Instant, Duration};
 use net2::UdpBuilder;
 
-use crate::util::ByteConvertible;
-
 #[macro_use]
 extern crate bitfield;
 
@@ -37,6 +35,12 @@ fn test(query: &dns::Packet) {
     for idx in 0..des_ser.len() {
         assert_eq!(ser[idx], des_ser[idx]);
     }
+
+    let compressed = des.to_bytes_compressed();
+    let compressed_parsed = dns::Packet::from_network(&compressed).unwrap();
+    println!("Unco: {:?}", des.records);
+    println!("Comp: {:?}", compressed_parsed.records);
+    println!("=========================================================\n\n");
 }
 
 pub fn discovery(record_name: &str, delay: &Duration) -> Result<Vec<MdnsResponse>, dns::DnsError> {

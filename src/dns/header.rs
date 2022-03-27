@@ -65,4 +65,9 @@ impl ByteConvertible for Header {
         buffer.extend_from_slice(&u16::to_be_bytes(self.add_count));
         buffer
     }
+
+    fn to_bytes_compressed(&self, _: &mut std::collections::HashMap<u64, usize>, _: usize) -> Vec<u8> {
+        // There is nothing to compress in the header
+        self.to_bytes()
+    }
 }

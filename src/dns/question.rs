@@ -31,4 +31,12 @@ impl ByteConvertible for Question {
         buffer.extend_from_slice(&u16::to_be_bytes(self.q_class as u16));
         buffer
     }
+
+    fn to_bytes_compressed(&self, names: &mut std::collections::HashMap<u64, usize>, offset: usize) -> Vec<u8> {
+        let mut buffer = Vec::new();
+        buffer.extend_from_slice(&self.q_name.to_bytes_compressed(names, offset));
+        buffer.extend_from_slice(&u16::to_be_bytes(self.q_type as u16));
+        buffer.extend_from_slice(&u16::to_be_bytes(self.q_class as u16));
+        buffer
+    }
 }

@@ -1,8 +1,6 @@
+use super::{COMPRESSION_MASK, COMPRESSION_MASK_U16};
 use super::fqdn::FQDN;
 use super::error::DnsError;
-
-pub(super) const COMPRESSION_MASK: u8 = 0b1100_0000;
-pub(super) const COMPRESSION_MASK_U16: u16 = 0b1100_0000_0000_0000;
 
 pub(super) fn resolve_pointers_in_range(range: &[u8], buffer: &[u8], start_in_buffer: usize) -> Result<Vec<u8>, DnsError> {
     let mut resolved_buffer = range.to_vec();
