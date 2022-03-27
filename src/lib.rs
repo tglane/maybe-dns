@@ -18,7 +18,7 @@ pub struct MdnsResponse {
 
 fn test(query: &dns::Packet) {
     let ser = query.to_bytes();
-    let des = dns::Packet::from_network(&ser).unwrap();
+    let des = dns::Packet::try_from(&ser[..]).unwrap();
 
     println!("[HEADER] {:?} -> {:?}", query.header, des.header);
     for rec in query.records.iter() {
@@ -36,8 +36,8 @@ fn test(query: &dns::Packet) {
         assert_eq!(ser[idx], des_ser[idx]);
     }
 
-    let compressed = des.to_bytes_compressed();
-    let compressed_parsed = dns::Packet::from_network(&compressed).unwrap();
+    let compressed = query.to_bytes_compressed();
+    let compressed_parsed = dns::Packet::try_from(&compressed[..]).unwrap();
     println!("Unco: {:?}", des.records);
     println!("Comp: {:?}", compressed_parsed.records);
     println!("=========================================================\n\n");
@@ -66,7 +66,7 @@ pub fn discovery(record_name: &str, delay: &Duration) -> Result<Vec<MdnsResponse
             Ok((size, peer)) => {
                 println!("Received {} bytes from {:?}", size, peer);
 
-                let packet = dns::Packet::from_network(&response_buffer[..size])?;
+                let packet = dns::Packet::try_from(&response_buffer[..size])?;
 
                 // Test parsing of larger packet
                 test(&packet);

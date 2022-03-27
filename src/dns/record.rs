@@ -1,4 +1,5 @@
 use std::mem::size_of;
+use std::convert::{From, TryFrom, TryInto};
 use std::array::TryFromSliceError;
 use std::net::{Ipv4Addr, Ipv6Addr};
 
@@ -15,8 +16,8 @@ pub enum RecordClass {
     Unassigned,
 }
 
-impl RecordClass {
-    pub fn from(number: u16) -> Self {
+impl From<u16> for RecordClass {
+    fn from(number: u16) -> Self {
         let number = number & 0b01111111_11111111;
         match number {
             1 => RecordClass::IN,
@@ -47,25 +48,6 @@ pub enum RecordType {
 }
 
 impl RecordType {
-    pub fn from(number: u16) -> Result<Self, DnsError> {
-        match number {
-             1 => Ok(RecordType::A),
-             2 => Ok(RecordType::NS),
-             5 => Ok(RecordType::CNAME),
-             6 => Ok(RecordType::SOA),
-            10 => Ok(RecordType::NULL),
-            11 => Ok(RecordType::WKS),
-            12 => Ok(RecordType::PTR),
-            13 => Ok(RecordType::HINFO),
-            14 => Ok(RecordType::MINFO),
-            15 => Ok(RecordType::MX),
-            16 => Ok(RecordType::TXT),
-            28 => Ok(RecordType::AAAA),
-            33 => Ok(RecordType::SRV),
-             _ => Err(DnsError::InvalidType(number)),
-        }
-    }
-
     pub fn compression_allowed(&self) -> bool {
         match self {
             RecordType::A => false,
@@ -81,6 +63,29 @@ impl RecordType {
             RecordType::TXT => true,
             RecordType::AAAA => false,
             RecordType::SRV => true,
+        }
+    }
+}
+
+impl TryFrom<u16> for RecordType {
+    type Error = DnsError;
+
+    fn try_from(number: u16) -> Result<Self, DnsError> {
+        match number {
+             1 => Ok(RecordType::A),
+             2 => Ok(RecordType::NS),
+             5 => Ok(RecordType::CNAME),
+             6 => Ok(RecordType::SOA),
+            10 => Ok(RecordType::NULL),
+            11 => Ok(RecordType::WKS),
+            12 => Ok(RecordType::PTR),
+            13 => Ok(RecordType::HINFO),
+            14 => Ok(RecordType::MINFO),
+            15 => Ok(RecordType::MX),
+            16 => Ok(RecordType::TXT),
+            28 => Ok(RecordType::AAAA),
+            33 => Ok(RecordType::SRV),
+             _ => Err(DnsError::InvalidType(number)),
         }
     }
 }

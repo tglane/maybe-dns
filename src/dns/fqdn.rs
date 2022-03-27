@@ -1,3 +1,5 @@
+use std::convert::From;
+
 use crate::util::{ByteConvertible, hash_bytes};
 use super::COMPRESSION_MASK_U16;
 
@@ -7,28 +9,6 @@ pub struct FQDN {
 }
 
 impl FQDN {
-    pub fn from(buffer: &[u8]) -> Self {
-        let mut pos = 0_usize;
-        let mut data = Vec::<Vec<u8>>::new();
-
-        loop {
-            if pos >= buffer.len() {
-                break;
-            }
-
-            let len = buffer[pos];
-            pos += 1;
-            if pos+len as usize > buffer.len() || len == 0 {
-                break;
-            }
-
-            data.push(buffer[pos..pos+len as usize].to_vec());
-            pos += len as usize;
-        }
-
-        Self { data }
-    }
-
     pub fn with(name: &str) -> Self {
         let mut data = Vec::<Vec<u8>>::new();
 
@@ -83,10 +63,6 @@ impl ByteConvertible for FQDN {
     fn to_bytes_compressed(&self, names: &mut std::collections::HashMap<u64, usize>, mut offset: usize) -> Vec<u8> {
         let mut buffer = Vec::new();
 
-        // 1. Check if a name_part is already in the names map
-        // 2.   yes -> add name part and pointer to buffer
-        // 2.   no -> add complete name to buffer AND add all name_parts to names map
-
         for name_part in self.iter() {
             let part_hash = hash_bytes(&name_part);
             if let Some(compressed_offset) = names.get(&part_hash) {
@@ -105,5 +81,29 @@ impl ByteConvertible for FQDN {
 
         buffer.push(0);
         buffer
+    }
+}
+
+impl From<&[u8]> for FQDN {
+    fn from(buffer: &[u8]) -> Self {
+        let mut pos = 0_usize;
+        let mut data = Vec::<Vec<u8>>::new();
+
+        loop {
+            if pos >= buffer.len() {
+                break;
+            }
+
+            let len = buffer[pos];
+            pos += 1;
+            if pos+len as usize > buffer.len() || len == 0 {
+                break;
+            }
+
+            data.push(buffer[pos..pos+len as usize].to_vec());
+            pos += len as usize;
+        }
+
+        Self { data }
     }
 }

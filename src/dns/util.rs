@@ -17,7 +17,7 @@ pub(super) fn resolve_pointers_in_range(range: &[u8], buffer: &[u8], start_in_bu
 
 pub(super) fn resolve_pointer(buffer: &[u8], idx: usize) -> Result<FQDN, DnsError> {
     let resolved_buffer = resolve_pointer_impl(buffer, idx)?;
-    Ok(FQDN::from(&resolved_buffer))
+    Ok(FQDN::from(&resolved_buffer[..]))
 }
 
 fn resolve_pointer_impl(buffer: &[u8], idx: usize) -> Result<Vec<u8>, DnsError> {

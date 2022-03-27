@@ -1,4 +1,5 @@
 use std::mem::size_of;
+use std::convert::{TryFrom, TryInto};
 
 use crate::util::ByteConvertible;
 use super::error::DnsError;
@@ -35,19 +36,6 @@ pub struct Header {
 
 impl Header {
     pub(super) const SIZE: usize = size_of::<Self>();
-
-    pub(super) fn from_network(buffer: &[u8; size_of::<Header>()]) -> Result<Self, DnsError> {
-        Ok(Header {
-            id: u16::from_be_bytes(buffer[0..2].try_into()?),
-            bitfield: DnsHeaderBitfield(u16::from_be_bytes(buffer[2..4].try_into()?)),
-            ques_count: u16::from_be_bytes(buffer[4..6].try_into()?),
-            ans_count: u16::from_be_bytes(buffer[6..8].try_into()?),
-            auth_count: u16::from_be_bytes(buffer[8..10].try_into()?),
-            add_count: u16::from_be_bytes(buffer[10..12].try_into()?),
-        })
-    }
-
-    // TODO Add accessor for struct fields
 }
 
 impl ByteConvertible for Header {
@@ -69,5 +57,20 @@ impl ByteConvertible for Header {
     fn to_bytes_compressed(&self, _: &mut std::collections::HashMap<u64, usize>, _: usize) -> Vec<u8> {
         // There is nothing to compress in the header
         self.to_bytes()
+    }
+}
+
+impl TryFrom<&[u8; 12]> for Header {
+    type Error = DnsError;
+
+    fn try_from(buffer: &[u8; 12]) -> Result<Self, Self::Error> {
+        Ok(Header {
+            id: u16::from_be_bytes(buffer[0..2].try_into()?),
+            bitfield: DnsHeaderBitfield(u16::from_be_bytes(buffer[2..4].try_into()?)),
+            ques_count: u16::from_be_bytes(buffer[4..6].try_into()?),
+            ans_count: u16::from_be_bytes(buffer[6..8].try_into()?),
+            auth_count: u16::from_be_bytes(buffer[8..10].try_into()?),
+            add_count: u16::from_be_bytes(buffer[10..12].try_into()?),
+        })
     }
 }
