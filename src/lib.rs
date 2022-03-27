@@ -66,12 +66,13 @@ pub fn discovery(record_name: &str, delay: &Duration) -> Result<Vec<MdnsResponse
             Ok((size, peer)) => {
                 println!("Received {} bytes from {:?}", size, peer);
 
-                let packet = dns::Packet::try_from(&response_buffer[..size])?;
-
-                // Test parsing of larger packet
-                test(&packet);
-
-                responses.push(MdnsResponse { peer, packet });
+                match dns::Packet::try_from(&response_buffer[..size]) {
+                    Ok(packet) => {
+                        test(&packet);
+                        responses.push(MdnsResponse {peer, packet });
+                    },
+                    Err(_) => (),
+                }
             },
             Err(e) => println!("ERROR {:?}", e)
         }
