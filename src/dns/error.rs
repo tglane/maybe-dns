@@ -5,8 +5,6 @@ pub enum DnsError {
     InvalidPacketData,
 }
 
-// TODO Implement conversions
-
 impl std::error::Error for DnsError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         Some(self)

@@ -13,3 +13,4 @@ categories = ["network-programming", "parsing", "parser-implementations", "web-p
 [dependencies]
 bitfield = "*"
 net2 = "*"
+rand = "*"

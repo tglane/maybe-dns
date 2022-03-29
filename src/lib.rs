@@ -1,100 +1,43 @@
 pub mod dns;
-pub mod util;
-
-use std::net::SocketAddr;
-use std::time::{Instant, Duration};
-use net2::UdpBuilder;
+pub mod mdns;
+mod util;
 
 #[macro_use]
 extern crate bitfield;
-
-const QUERY_IP: &str = "224.0.0.251";
-const QUERY_PORT: u16 = 5353;
-
-pub struct MdnsResponse {
-    pub peer: SocketAddr,
-    pub packet: dns::Packet,
-}
-
-fn test(query: &dns::Packet) {
-    let ser = query.to_bytes();
-    let des = dns::Packet::try_from(&ser[..]).unwrap();
-
-    println!("[HEADER] {:?} -> {:?}", query.header, des.header);
-    for rec in query.records.iter() {
-        println!("[RECORD] {:?}", rec.rdata);
-    }
-    println!("---------------------------------------------------------\n");
-    for rec in des.records.iter() {
-        println!("[Check RECORD] {:?}", rec.rdata);
-    }
-    println!("=========================================================\n\n");
-
-    let des_ser = des.to_bytes();
-    assert_eq!(ser.len(), des_ser.len());
-    for idx in 0..des_ser.len() {
-        assert_eq!(ser[idx], des_ser[idx]);
-    }
-
-    let compressed = query.to_bytes_compressed();
-    let compressed_parsed = dns::Packet::try_from(&compressed[..]).unwrap();
-    println!("Unco: {:?}", des.records);
-    println!("Comp: {:?}", compressed_parsed.records);
-    println!("=========================================================\n\n");
-}
-
-pub fn discovery(record_name: &str, delay: &Duration) -> Result<Vec<MdnsResponse>, dns::DnsError> {
-    // Prepare DNS query
-    let dns_query = dns::Packet::with_question(1234, &dns::Question::with(record_name, dns::RecordType::PTR, dns::RecordClass::IN));
-
-    let builder = UdpBuilder::new_v4().unwrap();
-    builder.reuse_address(true).unwrap();
-    let sock = builder.bind("0.0.0.0:5353").unwrap();
-    sock.set_read_timeout(Some(*delay)).unwrap();
-
-    // Send binary and wait for answers
-    sock.send_to(&dns_query.to_bytes(), format!("{}:{}", QUERY_IP, QUERY_PORT)).unwrap();
-
-    let mut responses = Vec::<MdnsResponse>::new();
-
-    let discovery_start = Instant::now();
-    while discovery_start.elapsed() <= *delay {
-        println!("Waiting..");
-        // Parse struct QueryResponse from response_buffer
-        let mut response_buffer = [0_u8; 2048];
-        match sock.recv_from(&mut response_buffer) {
-            Ok((size, peer)) => {
-                println!("Received {} bytes from {:?}", size, peer);
-
-                match dns::Packet::try_from(&response_buffer[..size]) {
-                    Ok(packet) => {
-                        test(&packet);
-                        responses.push(MdnsResponse {peer, packet });
-                    },
-                    Err(_) => (),
-                }
-            },
-            Err(e) => println!("ERROR {:?}", e)
-        }
-    }
-
-    Ok(responses)
-}
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    // TODO Implement proper unit tests
+    // TODO Implement proper unit tests for the dns submodule as well
 
     #[test]
     fn discovery_test() {
-        let res = discovery("_googlecast._tcp.local", &Duration::from_millis(500));
-        match res {
-            Ok(res_vec) => {
-                println!("Found somethin! -- Number of responses: {}", res_vec.len());
+        let responses = mdns::discovery("_googlecast._tcp.local", &std::time::Duration::from_millis(500));
+        println!("Found something! -- Number of received responses: {}", responses.len());
+        for res in responses.iter() {
+            if let Some(packet) = &res.packet {
+                let serialized = packet.to_bytes();
+                assert_eq!(serialized.len(), packet.byte_size());
+
+                let desrerialized = dns::Packet::try_from(&serialized[..]).expect("Parsing failed");
+                let desrerialized_serialized = desrerialized.to_bytes();
+                assert_eq!(serialized.len(), desrerialized_serialized.len());
+                for idx in 0..serialized.len() {
+                    assert_eq!(serialized[idx], desrerialized_serialized[idx]);
+                }
+
+                let compressed = packet.to_bytes_compressed();
+                let compressed_deserialized = dns::Packet::try_from(&compressed[..]).expect("Failed to parse");
+                let compressed_uncompressed = compressed_deserialized.to_bytes();
+
+                assert_eq!(compressed_deserialized.byte_size(), packet.byte_size());
+                for idx in 0..serialized.len() {
+                    assert_eq!(serialized[idx], compressed_uncompressed[idx]);
+                }
+            } else {
+                println!("Error: {:?}", &res.error);
             }
-            Err(err) => println!("Found nothing... {:?}", err),
         }
     }
 }

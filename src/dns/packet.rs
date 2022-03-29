@@ -47,10 +47,6 @@ impl Packet {
         }
     }
 
-    pub fn id(&self) -> u16 {
-        self.header.id
-    }
-
     pub fn add_question(&mut self, question: Question) {
         self.questions.push(question);
         self.header.ques_count += 1;
@@ -154,6 +150,7 @@ impl TryFrom<&[u8]> for Packet {
         for _ in 0..packet.header.ans_count+packet.header.auth_count+packet.header.add_count {
             let (a_name, name_len) = if buffer[buffer_idx] & COMPRESSION_MASK == COMPRESSION_MASK {
                 // Name represented by pointer
+                // let offset = (u16::from_be_bytes(buffer[buffer_idx..buffer_idx+2].try_into()?) & !COMPRESSION_MASK_U16) as usize;
                 let offset = (u16::from_be_bytes(buffer[buffer_idx..buffer_idx+2].try_into()?) & !COMPRESSION_MASK_U16) as usize;
                 (resolve_pointer(buffer, offset)?, 2)
             } else {
@@ -163,7 +160,6 @@ impl TryFrom<&[u8]> for Packet {
                 (fqdn, len)
             };
             buffer_idx += name_len;
-            // println!("[DEBUG] {:?}", &buffer[buffer_idx-10..buffer_idx+10]);
 
             let a_type = RecordType::try_from(u16::from_be_bytes(buffer[buffer_idx..buffer_idx+2].try_into()?))?;
             buffer_idx += 2;

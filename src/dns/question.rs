@@ -19,7 +19,7 @@ impl Question {
 
 impl ByteConvertible for Question {
     fn byte_size(&self) -> usize {
-        self.q_name.len() +
+        self.q_name.byte_size() +
         size_of::<u16>() +
         size_of::<u16>()
     }
