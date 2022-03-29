@@ -344,7 +344,7 @@ impl ByteConvertible for RecordData {
             RecordData::MX { ref preference, ref exchange } => {
                 let mut buffer = Vec::with_capacity(exchange.byte_size() + 2);
                 buffer.extend_from_slice(&u16::to_be_bytes(*preference));
-                buffer.extend_from_slice(&exchange.to_bytes_compressed(names, outer_off));
+                buffer.extend_from_slice(&exchange.to_bytes_compressed(names, outer_off + 2));
                 buffer
             },
             RecordData::TXT(ref store) => store.iter().fold(Vec::new(), |mut buff, elem| {
@@ -359,7 +359,7 @@ impl ByteConvertible for RecordData {
                 buff.extend_from_slice(&u16::to_be_bytes(*priority));
                 buff.extend_from_slice(&u16::to_be_bytes(*weight));
                 buff.extend_from_slice(&u16::to_be_bytes(*port));
-                buff.extend_from_slice(&target.to_bytes_compressed(names, outer_off));
+                buff.extend_from_slice(&target.to_bytes_compressed(names, outer_off + 6));
                 buff
             },
         }
@@ -392,6 +392,7 @@ impl ByteConvertible for ResourceRecord {
             size_of::<u16>() +
             size_of::<u16>() +
             size_of::<u32>() +
+            size_of::<u16>() +
             self.rdata.byte_size()
     }
 
