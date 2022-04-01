@@ -45,6 +45,7 @@ pub enum RecordType {
     TXT = 16,
     AAAA = 28,
     SRV = 33,
+    NSEC = 47,
 }
 
 impl RecordType {
@@ -63,6 +64,7 @@ impl RecordType {
             RecordType::TXT => true,
             RecordType::AAAA => false,
             RecordType::SRV => true,
+            RecordType::NSEC => false,
         }
     }
 }
@@ -85,6 +87,7 @@ impl TryFrom<u16> for RecordType {
             16 => Ok(RecordType::TXT),
             28 => Ok(RecordType::AAAA),
             33 => Ok(RecordType::SRV),
+            47 => Ok(RecordType::NSEC),
              _ => Err(DnsError::InvalidType(number)),
         }
     }
@@ -132,6 +135,10 @@ pub enum RecordData {
         port: u16,
         target: FQDN,
     },
+    NSEC {
+        next_domain_name: FQDN,
+        type_mask: Vec<u8>,
+    },
 }
 
 impl RecordData {
@@ -150,6 +157,7 @@ impl RecordData {
             RecordType::TXT => RecordData::parse_txt(buffer),
             RecordType::AAAA => RecordData::AAAA(Ipv6Addr::from(u128::from_be_bytes(buffer.try_into()?))),
             RecordType::SRV => RecordData::parse_srv(buffer)?,
+            RecordType::NSEC => RecordData::parse_nsec(buffer),
         })
     }
 
@@ -216,6 +224,12 @@ impl RecordData {
 
         Ok(RecordData::SRV { priority, weight, port, target })
     }
+
+    fn parse_nsec(buffer: &[u8]) -> Self {
+        let next_domain_name = FQDN::from(&buffer[..]);
+        let type_mask = buffer[next_domain_name.byte_size()..].to_vec();
+        RecordData::NSEC { next_domain_name, type_mask }
+    }
 }
 
 impl ByteConvertible for RecordData {
@@ -236,6 +250,7 @@ impl ByteConvertible for RecordData {
             RecordData::TXT(ref store) => store.iter().fold(0, |acc, elem| acc + elem.len() + 1),
             RecordData::AAAA(_) => 16,
             RecordData::SRV { priority: _, weight: _, port: _, ref target } => 2 + 2 + 2 + target.len() + 2,
+            RecordData::NSEC { ref next_domain_name, ref type_mask } => next_domain_name.byte_size() + type_mask.len(),
         }
     }
 
@@ -299,6 +314,11 @@ impl ByteConvertible for RecordData {
                 buff.extend_from_slice(&target.to_bytes());
                 buff
             },
+            RecordData::NSEC { ref next_domain_name, ref type_mask } => {
+                let mut buff = next_domain_name.to_bytes();
+                buff.extend_from_slice(&type_mask);
+                buff
+            }
         }
     }
 
@@ -362,6 +382,11 @@ impl ByteConvertible for RecordData {
                 buff.extend_from_slice(&target.to_bytes_compressed(names, outer_off + 6));
                 buff
             },
+            RecordData::NSEC { ref next_domain_name, ref type_mask } => {
+                let mut buff = next_domain_name.to_bytes();
+                buff.extend_from_slice(&type_mask);
+                buff
+            }
         }
     }
 }
