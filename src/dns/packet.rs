@@ -2,7 +2,7 @@ use std::convert::{TryFrom, TryInto};
 
 use crate::util::ByteConvertible;
 use super::{COMPRESSION_MASK, COMPRESSION_MASK_U16};
-use super::header::{DnsHeaderBitfield, Header};
+use super::header::Header;
 use super::question::Question;
 use super::record::{RecordClass, RecordType, RecordData, ResourceRecord};
 use super::fqdn::FQDN;
@@ -13,48 +13,30 @@ use super::util::{resolve_pointers_in_range, resolve_pointer};
 pub struct Packet {
     pub header: Header,
     pub questions: Vec<Question>,
-    pub records: Vec<ResourceRecord>,
+    pub answers: Vec<ResourceRecord>,
+    pub authorities: Vec<ResourceRecord>,
+    pub additional: Vec<ResourceRecord>,
 }
 
 impl Packet {
     pub fn new() -> Self {
         Packet {
-            header: Header {
-                id: 0,
-                bitfield: DnsHeaderBitfield(0),
-                ques_count: 0,
-                ans_count: 0,
-                auth_count: 0,
-                add_count: 0,
-            },
+            header: Header::new_query(0),
             questions: Vec::new(),
-            records: Vec::new(),
+            answers: Vec::new(),
+            authorities: Vec::new(),
+            additional: Vec::new(),
         }
     }
 
     pub fn with_question(id: u16, question: &Question) -> Self {
         Packet {
-            header: Header {
-                id,
-                bitfield: DnsHeaderBitfield(0),
-                ques_count: 1_u16,
-                ans_count: 0,
-                auth_count: 0,
-                add_count: 0,
-            },
+            header: Header::new_query(id),
             questions: vec![question.clone()],
-            records: Vec::new(),
+            answers: Vec::new(),
+            authorities: Vec::new(),
+            additional: Vec::new(),
         }
-    }
-
-    pub fn add_question(&mut self, question: Question) {
-        self.questions.push(question);
-        self.header.ques_count += 1;
-    }
-
-    pub fn add_resource(&mut self, resource: ResourceRecord) {
-        self.records.push(resource);
-        self.header.ans_count += 1;
     }
 
     pub fn byte_size(&self) -> usize {
@@ -62,33 +44,60 @@ impl Packet {
         for ques in self.questions.iter() {
             size += ques.byte_size();
         }
-        for ans in self.records.iter() {
-            size += ans.byte_size();
+        for rec in self.answers.iter() {
+            size += rec.byte_size();
+        }
+        for rec in self.authorities.iter() {
+            size += rec.byte_size();
+        }
+        for rec in self.additional.iter() {
+            size += rec.byte_size();
         }
         size
     }
 
     pub fn to_bytes(&self) -> Vec<u8> {
-        let header_bin_len = self.header.byte_size();
-
-        let mut questions_bin_len = 0;
+        let mut byte_len = self.header.byte_size();
         for ques in self.questions.iter() {
-            questions_bin_len += ques.byte_size();
+            byte_len += ques.byte_size();
+        }
+        for rec in self.answers.iter() {
+            byte_len += rec.byte_size();
+        }
+        for rec in self.authorities.iter() {
+            byte_len += rec.byte_size();
+        }
+        for rec in self.additional.iter() {
+            byte_len += rec.byte_size();
         }
 
-        let mut records_bin_len = 0;
-        for ans in self.records.iter() {
-            records_bin_len += ans.byte_size();
-        }
-
-        let mut bin = Vec::with_capacity(header_bin_len + questions_bin_len + records_bin_len);
-
+        let mut bin = Vec::with_capacity(byte_len);
         bin.extend_from_slice(&self.header.to_bytes());
+
+        // Set correct number of element into the header
+        let mut ptr = bin.as_mut_ptr() as *mut u16;
+        unsafe {
+            ptr = ptr.offset(2);
+            *ptr = (self.questions.len() as u16).to_be();
+            ptr = ptr.offset(1);
+            *ptr = (self.answers.len() as u16).to_be();
+            ptr = ptr.offset(1);
+            *ptr = (self.authorities.len() as u16).to_be();
+            ptr = ptr.offset(1);
+            *ptr = (self.additional.len() as u16).to_be();
+        };
+
         for ques in self.questions.iter() {
             bin.extend_from_slice(&ques.to_bytes());
         }
-        for ans in self.records.iter() {
-            bin.extend_from_slice(&ans.to_bytes());
+        for rec in self.answers.iter() {
+            bin.extend_from_slice(&rec.to_bytes());
+        }
+        for rec in self.authorities.iter() {
+            bin.extend_from_slice(&rec.to_bytes());
+        }
+        for rec in self.additional.iter() {
+            bin.extend_from_slice(&rec.to_bytes());
         }
 
         bin
@@ -102,8 +111,14 @@ impl Packet {
         for ques in self.questions.iter() {
             bin.extend_from_slice(&ques.to_bytes_compressed(&mut used_fqdn, bin.len()));
         }
-        for ans in self.records.iter() {
-            bin.extend_from_slice(&ans.to_bytes_compressed(&mut used_fqdn, bin.len()));
+        for rec in self.answers.iter() {
+            bin.extend_from_slice(&rec.to_bytes_compressed(&mut used_fqdn, bin.len()));
+        }
+        for rec in self.authorities.iter() {
+            bin.extend_from_slice(&rec.to_bytes_compressed(&mut used_fqdn, bin.len()));
+        }
+        for rec in self.additional.iter() {
+            bin.extend_from_slice(&rec.to_bytes_compressed(&mut used_fqdn, bin.len()));
         }
 
         bin
@@ -181,7 +196,7 @@ impl TryFrom<&[u8]> for Packet {
             };
             buffer_idx += data_len as usize;
 
-            packet.records.push(ResourceRecord { a_name, a_type, a_class, time_to_live, rdata });
+            packet.answers.push(ResourceRecord { a_name, a_type, a_class, time_to_live, rdata });
         }
 
         Ok(packet)

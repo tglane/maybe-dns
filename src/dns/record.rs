@@ -7,7 +7,7 @@ use crate::util::ByteConvertible;
 use super::fqdn::FQDN;
 use super::error::DnsError;
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum RecordClass {
     IN = 1,
     CS = 2,
@@ -30,7 +30,7 @@ impl From<u16> for RecordClass {
 }
 
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum RecordType {
     A = 1,
     NS = 2,

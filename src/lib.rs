@@ -2,9 +2,6 @@ pub mod dns;
 pub mod mdns;
 mod util;
 
-#[macro_use]
-extern crate bitfield;
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -14,7 +11,7 @@ mod tests {
     #[test]
     fn discovery_test() {
         let responses = mdns::discovery("_googlecast._tcp.local", &std::time::Duration::from_millis(500));
-        println!("Found something! -- Number of received responses: {}", responses.len());
+        println!("Discovery finished -- Number of received responses: {}", responses.len());
         for res in responses.iter() {
             if let Some(packet) = &res.packet {
                 let serialized = packet.to_bytes();
