@@ -60,7 +60,6 @@ mod tests {
         assert!(packet.is_ok());
 
         let packet = packet.unwrap();
-        println!("{:?}", &packet);
         assert_eq!(1, packet.questions.len());
         assert_eq!("google.com", packet.questions[0].q_name.to_string());
         assert_eq!(RecordType::A, packet.questions[0].q_type);
