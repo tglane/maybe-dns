@@ -1,7 +1,8 @@
-use std::convert::From;
+use std::convert::TryFrom;
 
 use crate::util::{ByteConvertible, hash_bytes};
-use super::COMPRESSION_MASK_U16;
+use super::DnsError;
+use super::{COMPRESSION_MASK, COMPRESSION_MASK_U16};
 
 #[derive(Clone, Debug)]
 pub struct FQDN {
@@ -84,19 +85,25 @@ impl ByteConvertible for FQDN {
     }
 }
 
-impl From<&[u8]> for FQDN {
-    fn from(buffer: &[u8]) -> Self {
+impl TryFrom<&[u8]> for FQDN {
+    type Error = DnsError;
+
+    fn try_from(buffer: &[u8]) -> Result<Self, DnsError> {
         let mut pos = 0_usize;
         let mut data = Vec::<Vec<u8>>::new();
 
         loop {
-            if pos >= buffer.len() {
-                break;
+            if pos >= 255 || pos >= buffer.len() {
+                return Err(DnsError::LengthViolation);
             }
 
             let len = buffer[pos];
             pos += 1;
-            if pos+len as usize > buffer.len() || len == 0 {
+            if len & COMPRESSION_MASK == COMPRESSION_MASK {
+                return Err(DnsError::UnresolveableCompressionPointer);
+            } else if pos+len as usize > buffer.len() {
+                return Err(DnsError::LengthViolation);
+            } else if len == 0 {
                 break;
             }
 
@@ -104,6 +111,6 @@ impl From<&[u8]> for FQDN {
             pos += len as usize;
         }
 
-        Self { data }
+        Ok(Self { data })
     }
 }

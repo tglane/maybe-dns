@@ -3,6 +3,8 @@ pub enum DnsError {
     InvalidClass(u16),
     InvalidType(u16),
     InvalidPacketData,
+    LengthViolation,
+    UnresolveableCompressionPointer,
 }
 
 impl std::error::Error for DnsError {

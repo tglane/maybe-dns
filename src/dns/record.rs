@@ -1,6 +1,5 @@
 use std::mem::size_of;
 use std::convert::{From, TryFrom, TryInto};
-use std::array::TryFromSliceError;
 use std::net::{Ipv4Addr, Ipv6Addr};
 
 use crate::util::ByteConvertible;
@@ -64,7 +63,7 @@ impl RecordType {
             RecordType::TXT => true,
             RecordType::AAAA => false,
             RecordType::SRV => true,
-            RecordType::NSEC => false,
+            RecordType::NSEC => true,
         }
     }
 }
@@ -145,25 +144,25 @@ impl RecordData {
     pub fn from(rec_type: RecordType, buffer: &[u8]) -> Result<Self, DnsError> {
         Ok(match rec_type {
             RecordType::A => RecordData::A(Ipv4Addr::from(u32::from_be_bytes(buffer.try_into()?))),
-            RecordType::NS => RecordData::NS(FQDN::from(buffer)),
-            RecordType::CNAME => RecordData::CNAME(FQDN::from(buffer)),
+            RecordType::NS => RecordData::NS(FQDN::try_from(buffer)?),
+            RecordType::CNAME => RecordData::CNAME(FQDN::try_from(buffer)?),
             RecordType::SOA => RecordData::parse_soa(buffer)?,
             RecordType::NULL => RecordData::NULL(buffer.to_vec()),
             RecordType::WKS => RecordData::parse_wks(buffer)?,
-            RecordType::PTR => RecordData::PTR(FQDN::from(buffer)),
+            RecordType::PTR => RecordData::PTR(FQDN::try_from(buffer)?),
             RecordType::HINFO => RecordData::parse_hinfo(buffer)?,
             RecordType::MINFO => RecordData::parse_minfo(buffer)?,
             RecordType::MX => RecordData::parse_mx(buffer)?,
             RecordType::TXT => RecordData::parse_txt(buffer),
             RecordType::AAAA => RecordData::AAAA(Ipv6Addr::from(u128::from_be_bytes(buffer.try_into()?))),
             RecordType::SRV => RecordData::parse_srv(buffer)?,
-            RecordType::NSEC => RecordData::parse_nsec(buffer),
+            RecordType::NSEC => RecordData::parse_nsec(buffer)?,
         })
     }
 
-    fn parse_soa(buffer: &[u8]) -> Result<Self, TryFromSliceError> {
-        let mname = FQDN::from(buffer);
-        let rname = FQDN::from(&buffer[mname.byte_size()..]);
+    fn parse_soa(buffer: &[u8]) -> Result<Self, DnsError> {
+        let mname = FQDN::try_from(buffer)?;
+        let rname = FQDN::try_from(&buffer[mname.byte_size()..])?;
         let idx_advanced = rname.len();
         let serial = u32::from_be_bytes(buffer[idx_advanced..idx_advanced+4].try_into()?);
         let refresh = u32::from_be_bytes(buffer[idx_advanced+4..idx_advanced+8].try_into()?);
@@ -174,7 +173,7 @@ impl RecordData {
         Ok(RecordData::SOA { mname, rname, serial, refresh, retry, expire, minimum })
     }
 
-    fn parse_wks(buffer: &[u8]) -> Result<Self, TryFromSliceError> {
+    fn parse_wks(buffer: &[u8]) -> Result<Self, DnsError> {
         let address = u32::from_be_bytes(buffer[0..2].try_into()?);
         let protocol = buffer[2];
         let bitmap = buffer[3..].to_vec();
@@ -192,15 +191,15 @@ impl RecordData {
     }
 
     fn parse_minfo(buffer: &[u8]) -> Result<Self, DnsError> {
-        let rmailbx = FQDN::from(buffer);
-        let emailbx = FQDN::from(&buffer[rmailbx.byte_size()..]);
+        let rmailbx = FQDN::try_from(buffer)?;
+        let emailbx = FQDN::try_from(&buffer[rmailbx.byte_size()..])?;
 
         Ok(RecordData::MINFO { rmailbx, emailbx })
     }
 
-    fn parse_mx(buffer: &[u8]) -> Result<Self, TryFromSliceError> {
+    fn parse_mx(buffer: &[u8]) -> Result<Self, DnsError> {
         let preference = u16::from_be_bytes(buffer[0..2].try_into()?);
-        let exchange = FQDN::from(&buffer[2..]);
+        let exchange = FQDN::try_from(&buffer[2..])?;
 
         Ok(RecordData::MX { preference, exchange })
     }
@@ -216,19 +215,19 @@ impl RecordData {
         RecordData::TXT(txt_store)
     }
 
-    fn parse_srv(buffer: &[u8]) -> Result<Self, TryFromSliceError> {
+    fn parse_srv(buffer: &[u8]) -> Result<Self, DnsError> {
         let priority = u16::from_be_bytes(buffer[0..2].try_into()?);
         let weight = u16::from_be_bytes(buffer[2..4].try_into()?);
         let port = u16::from_be_bytes(buffer[4..6].try_into()?);
-        let target = FQDN::from(&buffer[6..buffer.len()]);
+        let target = FQDN::try_from(&buffer[6..buffer.len()])?;
 
         Ok(RecordData::SRV { priority, weight, port, target })
     }
 
-    fn parse_nsec(buffer: &[u8]) -> Self {
-        let next_domain_name = FQDN::from(&buffer[..]);
+    fn parse_nsec(buffer: &[u8]) -> Result<Self, DnsError> {
+        let next_domain_name = FQDN::try_from(&buffer[..])?;
         let type_mask = buffer[next_domain_name.byte_size()..].to_vec();
-        RecordData::NSEC { next_domain_name, type_mask }
+        Ok(RecordData::NSEC { next_domain_name, type_mask })
     }
 }
 
@@ -383,7 +382,7 @@ impl ByteConvertible for RecordData {
                 buff
             },
             RecordData::NSEC { ref next_domain_name, ref type_mask } => {
-                let mut buff = next_domain_name.to_bytes();
+                let mut buff = next_domain_name.to_bytes_compressed(names, outer_off);
                 buff.extend_from_slice(&type_mask);
                 buff
             }

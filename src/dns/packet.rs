@@ -1,13 +1,13 @@
 use std::convert::{TryFrom, TryInto};
 
 use crate::util::ByteConvertible;
-use super::{COMPRESSION_MASK, COMPRESSION_MASK_U16};
 use super::header::Header;
 use super::question::Question;
 use super::record::{RecordClass, RecordType, RecordData, ResourceRecord};
 use super::fqdn::FQDN;
 use super::error::DnsError;
-use super::util::{resolve_pointers_in_range, resolve_pointer};
+use super::util::resolve_pointers_in_range;
+use super::COMPRESSION_MASK;
 
 #[derive(Clone, Debug)]
 pub struct Packet {
@@ -140,17 +140,11 @@ impl TryFrom<&[u8]> for Packet {
 
         // Parse questions from buffer
         for _ in 0..packet.header.ques_count {
-            let (q_name, name_len) = if buffer[buffer_idx] & COMPRESSION_MASK == COMPRESSION_MASK  {
-                // Name represented by pointer
-                let offset = (u16::from_be_bytes(buffer[buffer_idx..buffer_idx+2].try_into()?) & !COMPRESSION_MASK_U16) as usize;
-                (resolve_pointer(buffer, offset)?, 2)
-            } else {
-                // Name represented by fqdn in place
-                let fqdn = FQDN::from(&buffer[buffer_idx..]);
-                let len = fqdn.byte_size();
-                (fqdn, len)
-            };
-            buffer_idx += name_len;
+            // Resolve possible pointers in the questions name
+            let name_byte_len = name_range(&buffer[buffer_idx..])?;
+            let resolved_name_buffer = resolve_pointers_in_range(&buffer[buffer_idx..buffer_idx+name_byte_len], buffer, buffer_idx)?;
+            let q_name = FQDN::try_from(&resolved_name_buffer[..])?;
+            buffer_idx += name_byte_len;
 
             let q_type = RecordType::try_from(u16::from_be_bytes(buffer[buffer_idx..buffer_idx+2].try_into()?))?;
             buffer_idx += 2;
@@ -161,44 +155,71 @@ impl TryFrom<&[u8]> for Packet {
             packet.questions.push(Question { q_name, q_type, q_class });
         }
 
-        // Parse answers from buffer
-        for _ in 0..packet.header.ans_count+packet.header.auth_count+packet.header.add_count {
-            let (a_name, name_len) = if buffer[buffer_idx] & COMPRESSION_MASK == COMPRESSION_MASK {
-                // Name represented by pointer
-                // let offset = (u16::from_be_bytes(buffer[buffer_idx..buffer_idx+2].try_into()?) & !COMPRESSION_MASK_U16) as usize;
-                let offset = (u16::from_be_bytes(buffer[buffer_idx..buffer_idx+2].try_into()?) & !COMPRESSION_MASK_U16) as usize;
-                (resolve_pointer(buffer, offset)?, 2)
-            } else {
-                // Name represented by fqdn in place
-                let fqdn = FQDN::from(&buffer[buffer_idx..]);
-                let len = fqdn.byte_size();
-                (fqdn, len)
-            };
-            buffer_idx += name_len;
+        // Helper function to parse records from buffer
+        let parse_record = |buffer: &[u8], buffer_idx: &mut usize| -> Result<ResourceRecord, DnsError> {
+            // Resolve possible pointers in the records name
+            let name_byte_len = name_range(&buffer[*buffer_idx..])?;
+            let resolved_name_buffer = resolve_pointers_in_range(&buffer[*buffer_idx..*buffer_idx+name_byte_len], buffer, *buffer_idx)?;
+            let a_name = FQDN::try_from(&resolved_name_buffer[..])?;
+            *buffer_idx += name_byte_len;
 
-            let a_type = RecordType::try_from(u16::from_be_bytes(buffer[buffer_idx..buffer_idx+2].try_into()?))?;
-            buffer_idx += 2;
+            let a_type = RecordType::try_from(u16::from_be_bytes(buffer[*buffer_idx..*buffer_idx+2].try_into()?))?;
+            *buffer_idx += 2;
 
-            let a_class = RecordClass::from(u16::from_be_bytes(buffer[buffer_idx..buffer_idx+2].try_into()?));
-            buffer_idx += 2;
+            let a_class = RecordClass::from(u16::from_be_bytes(buffer[*buffer_idx..*buffer_idx+2].try_into()?));
+            *buffer_idx += 2;
 
-            let time_to_live = u32::from_be_bytes(buffer[buffer_idx..buffer_idx+4].try_into()?);
-            buffer_idx += 4;
+            let time_to_live = u32::from_be_bytes(buffer[*buffer_idx..*buffer_idx+4].try_into()?);
+            *buffer_idx += 4;
 
-            let data_len = u16::from_be_bytes(buffer[buffer_idx..buffer_idx+2].try_into()?);
-            buffer_idx += 2;
+            let data_len = u16::from_be_bytes(buffer[*buffer_idx..*buffer_idx+2].try_into()?);
+            *buffer_idx += 2;
 
             let rdata = if a_type.compression_allowed() {
-                let resolved_buffer = resolve_pointers_in_range(&buffer[buffer_idx..buffer_idx+data_len as usize], buffer, buffer_idx)?;
+                // Make sure to resolve pointers in the range of the record data
+                let resolved_buffer = resolve_pointers_in_range(&buffer[*buffer_idx..*buffer_idx+data_len as usize], buffer, *buffer_idx)?;
                 RecordData::from(a_type, &resolved_buffer)?
             } else {
-                RecordData::from(a_type, &buffer[buffer_idx..buffer_idx+data_len as usize])?
+                RecordData::from(a_type, &buffer[*buffer_idx..*buffer_idx+data_len as usize])?
             };
-            buffer_idx += data_len as usize;
+            *buffer_idx += data_len as usize;
 
-            packet.answers.push(ResourceRecord { a_name, a_type, a_class, time_to_live, rdata });
+            Ok(ResourceRecord { a_name, a_type, a_class, time_to_live, rdata })
+        };
+
+        for _ in 0..packet.header.ans_count {
+            packet.answers.push(parse_record(buffer, &mut buffer_idx)?);
+        }
+        for _ in 0..packet.header.auth_count {
+            packet.authorities.push(parse_record(buffer, &mut buffer_idx)?);
+        }
+        for _ in 0..packet.header.add_count {
+            packet.additional.push(parse_record(buffer, &mut buffer_idx)?);
         }
 
         Ok(packet)
+    }
+}
+
+
+fn name_range(buffer: &[u8]) -> Result<usize, DnsError> {
+    let mut pos = 0_usize;
+    loop {
+        if pos >= 255 || pos >= buffer.len() {
+            return Err(DnsError::LengthViolation);
+        }
+
+        let len = buffer[pos];
+        pos += 1;
+
+        if len & COMPRESSION_MASK == COMPRESSION_MASK {
+            return Ok(pos+1);
+        } else if pos+len as usize > buffer.len() {
+            return Err(DnsError::LengthViolation);
+        } else if len == 0 {
+            return Ok(pos);
+        }
+
+        pos += len as usize;
     }
 }

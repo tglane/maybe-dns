@@ -1,11 +1,10 @@
 use super::{COMPRESSION_MASK, COMPRESSION_MASK_U16};
-use super::fqdn::FQDN;
 use super::error::DnsError;
 
 pub(super) fn resolve_pointers_in_range(range: &[u8], buffer: &[u8], start_in_buffer: usize) -> Result<Vec<u8>, DnsError> {
     let mut resolved_buffer = range.to_vec();
     for (idx, byte) in range.iter().enumerate() {
-        if *byte == COMPRESSION_MASK {
+        if *byte & COMPRESSION_MASK == COMPRESSION_MASK {
             let offset = (u16::from_be_bytes(buffer[start_in_buffer+idx..start_in_buffer+idx+2].try_into().unwrap()) & !COMPRESSION_MASK_U16) as usize;
             let resolved_pointer = resolve_pointer_impl(buffer, offset)?;
             resolved_buffer.splice(idx..idx+2, resolved_pointer.iter().copied());
@@ -13,11 +12,6 @@ pub(super) fn resolve_pointers_in_range(range: &[u8], buffer: &[u8], start_in_bu
     }
 
     Ok(resolved_buffer)
-}
-
-pub(super) fn resolve_pointer(buffer: &[u8], idx: usize) -> Result<FQDN, DnsError> {
-    let resolved_buffer = resolve_pointer_impl(buffer, idx)?;
-    Ok(FQDN::from(&resolved_buffer[..]))
 }
 
 fn resolve_pointer_impl(buffer: &[u8], idx: usize) -> Result<Vec<u8>, DnsError> {
