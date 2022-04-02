@@ -6,11 +6,10 @@ mod util;
 mod tests {
     use super::*;
 
-    // TODO Implement proper unit tests for the dns submodule as well
-
     #[test]
     fn discovery_test() {
-        let responses = mdns::discovery("_googlecast._tcp.local", &std::time::Duration::from_millis(500));
+        // let responses = mdns::discovery("_googlecast._tcp.local", &std::time::Duration::from_millis(500));
+        let responses = mdns::discovery("_airplay._tcp.local", &std::time::Duration::from_millis(500));
         println!("Discovery finished -- Number of received responses: {}", responses.len());
         for res in responses.iter() {
             if let Some(packet) = &res.packet {
@@ -26,6 +25,7 @@ mod tests {
 
                 let compressed = packet.to_bytes_compressed();
                 let compressed_deserialized = dns::Packet::try_from(&compressed[..]).expect("Failed to parse");
+                assert_eq!(compressed_deserialized.byte_size(), desrerialized.byte_size());
                 let compressed_uncompressed = compressed_deserialized.to_bytes();
 
                 assert_eq!(compressed_deserialized.byte_size(), packet.byte_size());
@@ -33,7 +33,7 @@ mod tests {
                     assert_eq!(serialized[idx], compressed_uncompressed[idx]);
                 }
             } else {
-                println!("Error: {:?}", &res.error);
+                panic!("{:?}", &res.error);
             }
         }
     }

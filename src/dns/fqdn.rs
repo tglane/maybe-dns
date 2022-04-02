@@ -63,24 +63,27 @@ impl ByteConvertible for FQDN {
 
     fn to_bytes_compressed(&self, names: &mut std::collections::HashMap<u64, usize>, mut offset: usize) -> Vec<u8> {
         let mut buffer = Vec::new();
+        let flattend = self.to_bytes();
 
-        for name_part in self.iter() {
-            let part_hash = hash_bytes(&name_part);
-            if let Some(compressed_offset) = names.get(&part_hash) {
-                // Part of the name in buffer so we can use compression
+        let mut start_idx = 0;
+        while start_idx < flattend.len() {
+            let end_idx = start_idx+flattend[start_idx] as usize;
+            let name_part = &flattend[start_idx..=end_idx];
+            let remaining_hash = hash_bytes(&flattend[start_idx..]);
+
+            if let Some(compressed_offset) = names.get(&remaining_hash) {
                 let compressed_name = (*compressed_offset as u16 | COMPRESSION_MASK_U16).to_be_bytes();
                 buffer.extend_from_slice(&compressed_name);
                 return buffer;
             } else {
-                // Part of the name not in buffer
-                buffer.push(name_part.len() as u8);
                 buffer.extend_from_slice(&name_part);
-                names.insert(part_hash, offset);
-                offset += name_part.len() + 1;
+                names.insert(remaining_hash, offset);
+                offset += name_part.len();
             }
+
+            start_idx += flattend[start_idx] as usize + 1;
         }
 
-        buffer.push(0);
         buffer
     }
 }
