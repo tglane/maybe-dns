@@ -6,8 +6,7 @@ use super::question::Question;
 use super::record::{RecordClass, RecordType, RecordData, ResourceRecord};
 use super::fqdn::FQDN;
 use super::error::DnsError;
-use super::util::resolve_pointers_in_range;
-use super::COMPRESSION_MASK;
+use super::util::{resolve_pointer_in_name, get_name_range};
 
 #[derive(Clone, Debug)]
 pub struct Packet {
@@ -128,7 +127,7 @@ impl Packet {
 impl TryFrom<&[u8]> for Packet {
     type Error = DnsError;
 
-    fn try_from(buffer: &[u8]) -> Result<Self, Self::Error> {
+    fn try_from(buffer: &[u8]) -> Result<Self, DnsError> {
         if buffer.len() < Header::SIZE {
             return Err(DnsError::InvalidPacketData);
         }
@@ -141,8 +140,8 @@ impl TryFrom<&[u8]> for Packet {
         // Parse questions from buffer
         for _ in 0..packet.header.ques_count {
             // Resolve possible pointers in the questions name
-            let name_byte_len = name_range(&buffer[buffer_idx..])?;
-            let resolved_name_buffer = resolve_pointers_in_range(&buffer[buffer_idx..buffer_idx+name_byte_len], buffer, buffer_idx)?;
+            let name_byte_len = get_name_range(&buffer[buffer_idx..])?;
+            let resolved_name_buffer = resolve_pointer_in_name(&buffer[buffer_idx..buffer_idx+name_byte_len], buffer, buffer_idx)?;
             let q_name = FQDN::try_from(&resolved_name_buffer[..])?;
             buffer_idx += name_byte_len;
 
@@ -158,8 +157,8 @@ impl TryFrom<&[u8]> for Packet {
         // Helper function to parse records from buffer
         let parse_record = |buffer: &[u8], buffer_idx: &mut usize| -> Result<ResourceRecord, DnsError> {
             // Resolve possible pointers in the records name
-            let name_byte_len = name_range(&buffer[*buffer_idx..])?;
-            let resolved_name_buffer = resolve_pointers_in_range(&buffer[*buffer_idx..*buffer_idx+name_byte_len], buffer, *buffer_idx)?;
+            let name_byte_len = get_name_range(&buffer[*buffer_idx..])?;
+            let resolved_name_buffer = resolve_pointer_in_name(&buffer[*buffer_idx..*buffer_idx+name_byte_len], buffer, *buffer_idx)?;
             let a_name = FQDN::try_from(&resolved_name_buffer[..])?;
             *buffer_idx += name_byte_len;
 
@@ -175,13 +174,8 @@ impl TryFrom<&[u8]> for Packet {
             let data_len = u16::from_be_bytes(buffer[*buffer_idx..*buffer_idx+2].try_into()?);
             *buffer_idx += 2;
 
-            let rdata = if a_type.compression_allowed() {
-                // Make sure to resolve pointers in the range of the record data
-                let resolved_buffer = resolve_pointers_in_range(&buffer[*buffer_idx..*buffer_idx+data_len as usize], buffer, *buffer_idx)?;
-                RecordData::from(a_type, &resolved_buffer)?
-            } else {
-                RecordData::from(a_type, &buffer[*buffer_idx..*buffer_idx+data_len as usize])?
-            };
+            let data_end = *buffer_idx + data_len as usize;
+            let rdata = RecordData::extract_from(a_type, &buffer[*buffer_idx..data_end], buffer, *buffer_idx)?;
             *buffer_idx += data_len as usize;
 
             Ok(ResourceRecord { a_name, a_type, a_class, time_to_live, rdata })
@@ -198,28 +192,5 @@ impl TryFrom<&[u8]> for Packet {
         }
 
         Ok(packet)
-    }
-}
-
-
-fn name_range(buffer: &[u8]) -> Result<usize, DnsError> {
-    let mut pos = 0_usize;
-    loop {
-        if pos >= 255 || pos >= buffer.len() {
-            return Err(DnsError::LengthViolation);
-        }
-
-        let len = buffer[pos];
-        pos += 1;
-
-        if len & COMPRESSION_MASK == COMPRESSION_MASK {
-            return Ok(pos+1);
-        } else if pos+len as usize > buffer.len() {
-            return Err(DnsError::LengthViolation);
-        } else if len == 0 {
-            return Ok(pos);
-        }
-
-        pos += len as usize;
     }
 }

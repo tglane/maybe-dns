@@ -4,6 +4,7 @@ use std::net::{Ipv4Addr, Ipv6Addr};
 
 use crate::util::ByteConvertible;
 use super::fqdn::FQDN;
+use super::util::{resolve_pointer_in_name, get_name_range};
 use super::error::DnsError;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
@@ -146,88 +147,167 @@ impl RecordData {
             RecordType::A => RecordData::A(Ipv4Addr::from(u32::from_be_bytes(buffer.try_into()?))),
             RecordType::NS => RecordData::NS(FQDN::try_from(buffer)?),
             RecordType::CNAME => RecordData::CNAME(FQDN::try_from(buffer)?),
-            RecordType::SOA => RecordData::parse_soa(buffer)?,
+            RecordType::SOA => {
+                let mname = FQDN::try_from(buffer)?;
+                let rname = FQDN::try_from(&buffer[mname.byte_size()..])?;
+                let start_idx = rname.len();
+                let serial = u32::from_be_bytes(buffer[start_idx..start_idx+4].try_into()?);
+                let refresh = u32::from_be_bytes(buffer[start_idx+4..start_idx+8].try_into()?);
+                let retry = u32::from_be_bytes(buffer[start_idx+8..start_idx+12].try_into()?);
+                let expire = u32::from_be_bytes(buffer[start_idx+12..start_idx+16].try_into()?);
+                let minimum = u32::from_be_bytes(buffer[start_idx+16..start_idx+20].try_into()?);
+                RecordData::SOA { mname, rname, serial, refresh, retry, expire, minimum }
+            },
             RecordType::NULL => RecordData::NULL(buffer.to_vec()),
-            RecordType::WKS => RecordData::parse_wks(buffer)?,
+            RecordType::WKS => {
+                let address = u32::from_be_bytes(buffer[..2].try_into()?);
+                let protocol = buffer[2];
+                let bitmap = buffer[3..].to_vec();
+                RecordData::WKS { address, protocol, bitmap }
+            },
             RecordType::PTR => RecordData::PTR(FQDN::try_from(buffer)?),
-            RecordType::HINFO => RecordData::parse_hinfo(buffer)?,
-            RecordType::MINFO => RecordData::parse_minfo(buffer)?,
-            RecordType::MX => RecordData::parse_mx(buffer)?,
-            RecordType::TXT => RecordData::parse_txt(buffer),
+            RecordType::HINFO => {
+                let cpu_len = buffer[0] as usize;
+                let cpu = buffer[1..cpu_len].to_vec();
+                let os_len = buffer[cpu_len+ 1] as usize;
+                let os = buffer[cpu_len+2..cpu_len+2+os_len].to_vec();
+                RecordData::HINFO { cpu, os }
+            },
+            RecordType::MINFO => {
+                let rmailbx = FQDN::try_from(buffer)?;
+                let emailbx = FQDN::try_from(&buffer[rmailbx.byte_size()..])?;
+                RecordData::MINFO { rmailbx, emailbx }
+            },
+            RecordType::MX => {
+                let preference = u16::from_be_bytes(buffer[0..2].try_into()?);
+                let exchange = FQDN::try_from(&buffer[2..])?;
+                RecordData::MX { preference, exchange }
+            },
+            RecordType::TXT => {
+                let mut txt_store = Vec::<String>::new();
+                let mut idx = 0;
+                while idx < buffer.len() {
+                    let txt_size = buffer[idx];
+                    txt_store.push(String::from_utf8_lossy(&buffer[idx+1..idx+txt_size as usize+1]).to_string());
+                    idx += txt_size as usize + 1;
+                }
+                RecordData::TXT(txt_store)
+            },
             RecordType::AAAA => RecordData::AAAA(Ipv6Addr::from(u128::from_be_bytes(buffer.try_into()?))),
-            RecordType::SRV => RecordData::parse_srv(buffer)?,
-            RecordType::NSEC => RecordData::parse_nsec(buffer)?,
-        })
+            RecordType::SRV => {
+                let priority = u16::from_be_bytes(buffer[0..2].try_into()?);
+                let weight = u16::from_be_bytes(buffer[2..4].try_into()?);
+                let port = u16::from_be_bytes(buffer[4..6].try_into()?);
+                let target = FQDN::try_from(&buffer[6..buffer.len()])?;
+                RecordData::SRV { priority, weight, port, target }
+            },
+            RecordType::NSEC => {
+                let next_domain_name = FQDN::try_from(&buffer[..])?;
+                let type_mask = buffer[next_domain_name.byte_size()..].to_vec();
+                RecordData::NSEC { next_domain_name, type_mask }
+            },
+         })
     }
 
-    fn parse_soa(buffer: &[u8]) -> Result<Self, DnsError> {
-        let mname = FQDN::try_from(buffer)?;
-        let rname = FQDN::try_from(&buffer[mname.byte_size()..])?;
-        let idx_advanced = rname.len();
-        let serial = u32::from_be_bytes(buffer[idx_advanced..idx_advanced+4].try_into()?);
-        let refresh = u32::from_be_bytes(buffer[idx_advanced+4..idx_advanced+8].try_into()?);
-        let retry = u32::from_be_bytes(buffer[idx_advanced+8..idx_advanced+12].try_into()?);
-        let expire = u32::from_be_bytes(buffer[idx_advanced+12..idx_advanced+16].try_into()?);
-        let minimum = u32::from_be_bytes(buffer[idx_advanced+16..idx_advanced+20].try_into()?);
+     pub fn extract_from(rec_type: RecordType, range: &[u8], buffer: &[u8], mut start_idx: usize) -> Result<Self, DnsError> {
+        Ok(match rec_type {
+            RecordType::A => RecordData::A(Ipv4Addr::from(u32::from_be_bytes(range.try_into()?))),
+            RecordType::NS => {
+                let resolved_buffer = resolve_pointer_in_name(range, buffer, start_idx)?;
+                RecordData::NS(FQDN::try_from(&resolved_buffer[..])?)
+            },
+            RecordType::CNAME => {
+                let resolved_buffer = resolve_pointer_in_name(range, buffer, start_idx)?;
+                RecordData::CNAME(FQDN::try_from(&resolved_buffer[..])?)
+            },
+            RecordType::SOA => {
+                let mut name_len = get_name_range(range)?;
+                let mut name_resolved = resolve_pointer_in_name(&buffer[start_idx..start_idx+name_len], buffer, start_idx)?;
+                let mname = FQDN::try_from(&name_resolved[..])?;
+                start_idx += name_len;
 
-        Ok(RecordData::SOA { mname, rname, serial, refresh, retry, expire, minimum })
-    }
+                name_len = get_name_range(&range[name_len..])?;
+                name_resolved = resolve_pointer_in_name(&buffer[start_idx..start_idx+name_len], buffer, start_idx)?;
+                let rname = FQDN::try_from(&name_resolved[..])?;
+                start_idx += name_len;
 
-    fn parse_wks(buffer: &[u8]) -> Result<Self, DnsError> {
-        let address = u32::from_be_bytes(buffer[0..2].try_into()?);
-        let protocol = buffer[2];
-        let bitmap = buffer[3..].to_vec();
+                let serial = u32::from_be_bytes(buffer[start_idx..start_idx+4].try_into()?);
+                let refresh = u32::from_be_bytes(buffer[start_idx+4..start_idx+8].try_into()?);
+                let retry = u32::from_be_bytes(buffer[start_idx+8..start_idx+12].try_into()?);
+                let expire = u32::from_be_bytes(buffer[start_idx+12..start_idx+16].try_into()?);
+                let minimum = u32::from_be_bytes(buffer[start_idx+16..start_idx+20].try_into()?);
 
-        Ok(RecordData::WKS { address, protocol, bitmap })
-    }
+                RecordData::SOA { mname, rname, serial, refresh, retry, expire, minimum }
+            },
+            RecordType::NULL => RecordData::NULL(range.to_vec()),
+            RecordType::WKS => {
+                let address = u32::from_be_bytes(range[..2].try_into()?);
+                let protocol = range[2];
+                let bitmap = range[3..].to_vec();
+                RecordData::WKS { address, protocol, bitmap }
+            },
+            RecordType::PTR => {
+                let resolved_buffer = resolve_pointer_in_name(range, buffer, start_idx)?;
+                RecordData::PTR(FQDN::try_from(&resolved_buffer[..])?)
+            },
+            RecordType::HINFO => {
+                let cpu_len = range[0] as usize;
+                let cpu = range[1..cpu_len].to_vec();
+                let os_len = range[cpu_len+ 1] as usize;
+                let os = range[cpu_len+2..cpu_len+2+os_len].to_vec();
+                RecordData::HINFO { cpu, os }
+            },
+            RecordType::MINFO => {
+                let mut name_len = get_name_range(range)?;
+                let mut name_resolved = resolve_pointer_in_name(&range[..name_len], buffer, start_idx)?;
+                let rmailbx = FQDN::try_from(&name_resolved[..])?;
+                start_idx += name_len;
 
-    fn parse_hinfo(buffer: &[u8]) -> Result<Self, DnsError> {
-        let cpu_len = buffer[0] as usize;
-        let cpu = buffer[1..cpu_len].to_vec();
-        let os_len = buffer[cpu_len+ 1] as usize;
-        let os = buffer[cpu_len+2..cpu_len+2+os_len].to_vec();
+                name_len = get_name_range(&range[name_len..])?;
+                name_resolved = resolve_pointer_in_name(&buffer[start_idx..start_idx+name_len], buffer, start_idx)?;
+                let emailbx = FQDN::try_from(&name_resolved[..])?;
 
-        Ok(RecordData::HINFO { cpu, os })
-    }
+                RecordData::MINFO { rmailbx, emailbx }
+            },
+            RecordType::MX => {
+                let preference = u16::from_be_bytes(range[..2].try_into()?);
 
-    fn parse_minfo(buffer: &[u8]) -> Result<Self, DnsError> {
-        let rmailbx = FQDN::try_from(buffer)?;
-        let emailbx = FQDN::try_from(&buffer[rmailbx.byte_size()..])?;
+                let name_len = get_name_range(&range[2..])?;
+                let name_resolved = resolve_pointer_in_name(&range[2..2+name_len], buffer, start_idx+2)?;
+                let exchange = FQDN::try_from(&name_resolved[..])?;
 
-        Ok(RecordData::MINFO { rmailbx, emailbx })
-    }
+                RecordData::MX { preference, exchange }
+            },
+            RecordType::TXT => {
+                let mut txt_store = Vec::<String>::new();
+                let mut idx = 0;
+                while idx < range.len() {
+                    let txt_size = range[idx];
+                    txt_store.push(String::from_utf8_lossy(&range[idx+1..idx+txt_size as usize+1]).to_string());
+                    idx += txt_size as usize + 1;
+                }
+                RecordData::TXT(txt_store)
+            },
+            RecordType::AAAA => RecordData::AAAA(Ipv6Addr::from(u128::from_be_bytes(range.try_into()?))),
+            RecordType::SRV => {
+                let priority = u16::from_be_bytes(buffer[0..2].try_into()?);
+                let weight = u16::from_be_bytes(buffer[2..4].try_into()?);
+                let port = u16::from_be_bytes(buffer[4..6].try_into()?);
 
-    fn parse_mx(buffer: &[u8]) -> Result<Self, DnsError> {
-        let preference = u16::from_be_bytes(buffer[0..2].try_into()?);
-        let exchange = FQDN::try_from(&buffer[2..])?;
+                let name_len = get_name_range(&buffer[start_idx+6..])?;
+                let name_resolved = resolve_pointer_in_name(&buffer[start_idx+6..start_idx+6+name_len], buffer, start_idx+6)?;
+                let target = FQDN::try_from(&name_resolved[..])?;
 
-        Ok(RecordData::MX { preference, exchange })
-    }
-
-    fn parse_txt(buffer: &[u8]) -> Self {
-        let mut txt_store = Vec::<String>::new();
-        let mut idx = 0;
-        while idx < buffer.len() {
-            let txt_size = buffer[idx];
-            txt_store.push(String::from_utf8_lossy(&buffer[idx+1..idx+txt_size as usize+1]).to_string());
-            idx += txt_size as usize + 1;
-        }
-        RecordData::TXT(txt_store)
-    }
-
-    fn parse_srv(buffer: &[u8]) -> Result<Self, DnsError> {
-        let priority = u16::from_be_bytes(buffer[0..2].try_into()?);
-        let weight = u16::from_be_bytes(buffer[2..4].try_into()?);
-        let port = u16::from_be_bytes(buffer[4..6].try_into()?);
-        let target = FQDN::try_from(&buffer[6..buffer.len()])?;
-
-        Ok(RecordData::SRV { priority, weight, port, target })
-    }
-
-    fn parse_nsec(buffer: &[u8]) -> Result<Self, DnsError> {
-        let next_domain_name = FQDN::try_from(&buffer[..])?;
-        let type_mask = buffer[next_domain_name.byte_size()..].to_vec();
-        Ok(RecordData::NSEC { next_domain_name, type_mask })
+                RecordData::SRV { priority, weight, port, target }
+            },
+            RecordType::NSEC => {
+                let name_len = get_name_range(range)?;
+                let name_resolved = resolve_pointer_in_name(&buffer[start_idx..start_idx+name_len], buffer, start_idx)?;
+                let next_domain_name = FQDN::try_from(&name_resolved[..])?;
+                let type_mask = range[name_len..].to_vec();
+                RecordData::NSEC { next_domain_name, type_mask }
+            },
+         })
     }
 }
 

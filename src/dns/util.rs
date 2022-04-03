@@ -1,16 +1,16 @@
 use super::{COMPRESSION_MASK, COMPRESSION_MASK_U16};
 use super::error::DnsError;
 
-pub(super) fn resolve_pointers_in_range(range: &[u8], buffer: &[u8], start_in_buffer: usize) -> Result<Vec<u8>, DnsError> {
+pub(super) fn resolve_pointer_in_name(range: &[u8], buffer: &[u8], start_in_buffer: usize) -> Result<Vec<u8>, DnsError> {
     let mut resolved_buffer = range.to_vec();
-    for (idx, byte) in range.iter().enumerate() {
-        if *byte & COMPRESSION_MASK == COMPRESSION_MASK {
-            let offset = (u16::from_be_bytes(buffer[start_in_buffer+idx..start_in_buffer+idx+2].try_into().unwrap()) & !COMPRESSION_MASK_U16) as usize;
+    let idx = range.len()-2;
+    if range[idx] & COMPRESSION_MASK == COMPRESSION_MASK {
+        let offset = (u16::from_be_bytes(buffer[start_in_buffer+idx..start_in_buffer+idx+2].try_into().unwrap()) & !COMPRESSION_MASK_U16) as usize;
+        if offset < start_in_buffer {
             let resolved_pointer = resolve_pointer_impl(buffer, offset)?;
             resolved_buffer.splice(idx..idx+2, resolved_pointer.iter().copied());
         }
     }
-
     Ok(resolved_buffer)
 }
 
@@ -33,4 +33,26 @@ fn resolve_pointer_impl(buffer: &[u8], idx: usize) -> Result<Vec<u8>, DnsError> 
     }
 
     Ok(resolved)
+}
+
+pub(super) fn get_name_range(buffer: &[u8]) -> Result<usize, DnsError> {
+    let mut pos = 0_usize;
+    loop {
+        if pos >= 255 || pos >= buffer.len() {
+            return Err(DnsError::LengthViolation);
+        }
+
+        let len = buffer[pos];
+        pos += 1;
+
+        if len & COMPRESSION_MASK == COMPRESSION_MASK {
+            return Ok(pos+1);
+        } else if pos+len as usize > buffer.len() {
+            return Err(DnsError::LengthViolation);
+        } else if len == 0 {
+            return Ok(pos);
+        }
+
+        pos += len as usize;
+    }
 }
