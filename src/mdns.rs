@@ -2,7 +2,7 @@ use std::net::SocketAddr;
 use std::time::{Instant, Duration};
 use net2::UdpBuilder;
 
-use crate::dns::{Packet, Question, DnsError, RecordType, RecordClass};
+use crate::dns::{Packet, Question, DnsError, QClass, QType};
 
 const QUERY_IP: &str = "224.0.0.251";
 const QUERY_PORT: u16 = 5353;
@@ -21,7 +21,7 @@ pub fn discovery(record_name: &str, delay: &Duration) -> Vec<QueryResponse> {
     let mut rng = rand::thread_rng();
 
     let packet_id: u16 = rng.gen();
-    let dns_query = Packet::with_question(packet_id, &Question::with(record_name, RecordType::PTR, RecordClass::IN));
+    let dns_query = Packet::with_question(packet_id, false, &Question::with(record_name, QType::PTR, QClass::IN));
 
     let builder = UdpBuilder::new_v4().expect("[Error] Socket creation failed");
     builder.reuse_address(true).expect("[ERROR] Socket configuration failed");

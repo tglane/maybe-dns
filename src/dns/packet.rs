@@ -1,9 +1,9 @@
 use std::convert::{TryFrom, TryInto};
 
 use crate::util::ByteConvertible;
-use super::header::Header;
-use super::question::Question;
-use super::record::{RecordClass, RecordType, RecordData, ResourceRecord};
+use super::header::{Header, OpCode};
+use super::question::{QClass, QType, Question};
+use super::resource::{RecordClass, RecordType, RecordData, ResourceRecord};
 use super::fqdn::FQDN;
 use super::error::DnsError;
 use super::util::{resolve_pointer_in_name, get_name_range};
@@ -20,7 +20,7 @@ pub struct Packet {
 impl Packet {
     pub fn new() -> Self {
         Packet {
-            header: Header::new_query(0),
+            header: Header::new_query(0, false),
             questions: Vec::new(),
             answers: Vec::new(),
             authorities: Vec::new(),
@@ -28,9 +28,29 @@ impl Packet {
         }
     }
 
-    pub fn with_question(id: u16, question: &Question) -> Self {
+    pub fn new_query(id: u16, rc: bool) -> Self {
         Packet {
-            header: Header::new_query(id),
+            header: Header::new_query(id, rc),
+            questions: Vec::new(),
+            answers: Vec::new(),
+            authorities: Vec::new(),
+            additional: Vec::new(),
+        }
+    }
+
+    pub fn new_reply(id: u16) -> Self {
+        Self {
+            header: Header::new_reply(id, OpCode::StandardQuery),
+            questions: Vec::new(),
+            answers: Vec::new(),
+            authorities: Vec::new(),
+            additional: Vec::new(),
+        }
+    }
+
+    pub fn with_question(id: u16, rc: bool, question: &Question) -> Self {
+        Packet {
+            header: Header::new_query(id, rc),
             questions: vec![question.clone()],
             answers: Vec::new(),
             authorities: Vec::new(),
@@ -145,16 +165,16 @@ impl TryFrom<&[u8]> for Packet {
             let q_name = FQDN::try_from(&resolved_name_buffer[..])?;
             buffer_idx += name_byte_len;
 
-            let q_type = RecordType::try_from(u16::from_be_bytes(buffer[buffer_idx..buffer_idx+2].try_into()?))?;
+            let q_type = QType::try_from(u16::from_be_bytes(buffer[buffer_idx..buffer_idx+2].try_into()?))?;
             buffer_idx += 2;
 
-            let q_class = RecordClass::from(u16::from_be_bytes(buffer[buffer_idx..buffer_idx+2].try_into()?));
+            let q_class = QClass::from(u16::from_be_bytes(buffer[buffer_idx..buffer_idx+2].try_into()?));
             buffer_idx += 2;
 
             packet.questions.push(Question { q_name, q_type, q_class });
         }
 
-        // Helper function to parse records from buffer
+        // Closure function to parse records from buffer
         let parse_record = |buffer: &[u8], buffer_idx: &mut usize| -> Result<ResourceRecord, DnsError> {
             // Resolve possible pointers in the records name
             let name_byte_len = get_name_range(&buffer[*buffer_idx..])?;

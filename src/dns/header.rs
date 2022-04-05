@@ -57,8 +57,10 @@ pub struct Header {
 impl Header {
     pub(super) const SIZE: usize = size_of::<Self>();
 
-    pub fn new_query(id: u16) -> Self {
-        let flags = FlagBitfield::new().with_opcode(OpCode::StandardQuery as u8);
+    pub fn new_query(id: u16, rd: bool) -> Self {
+        let flags = FlagBitfield::new()
+            .with_opcode(OpCode::StandardQuery as u8)
+            .with_rd(rd as u8);
 
         Self {
             id,

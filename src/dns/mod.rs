@@ -1,20 +1,34 @@
 mod packet;
 mod question;
 mod header;
-mod record;
+mod resource;
 mod fqdn;
 mod error;
 mod util;
 
-pub use self::packet::Packet;
-pub use self::question::Question;
-pub use self::record::{RecordClass, RecordType, RecordData, ResourceRecord};
-pub use self::fqdn::FQDN;
-pub use self::header::{Header, OpCode};
-pub use self::error::DnsError;
 
 pub(super) const COMPRESSION_MASK: u8 = 0b1100_0000;
 pub(super) const COMPRESSION_MASK_U16: u16 = 0b1100_0000_0000_0000;
+
+
+/// Submodule containing a dns packet
+pub use self::packet::Packet;
+
+/// Submodule containing dns question record type and enums for its dns class and dns type
+pub use self::question::{QClass, QType, Question};
+
+/// Submodule containing dns resource record type and enums for its dns class and dns type
+pub use self::resource::{RecordClass, RecordType, RecordData, ResourceRecord};
+
+/// Submodule containing fully qualified domain name (FQDN) type
+pub use self::fqdn::FQDN;
+
+/// Submodule containing dns packets header type and enums used in the header
+pub use self::header::{Header, OpCode};
+
+/// Submodule containing the error type used by this module to represent errors in a consistent way
+pub use self::error::DnsError;
+
 
 #[cfg(test)]
 mod tests {
@@ -33,13 +47,13 @@ mod tests {
         let mut query = Packet::new();
         query.questions.push(Question::with(
             "_srv._udp.local".try_into().unwrap(),
-            RecordType::TXT,
-            RecordClass::IN
+            QType::TXT,
+            QClass::IN
         ));
         query.questions.push(Question::with(
             "_srv2._udp.local".try_into().unwrap(),
-            RecordType::TXT,
-            RecordClass::IN,
+            QType::TXT,
+            QClass::IN,
         ));
 
         let query = query.to_bytes();
@@ -62,8 +76,8 @@ mod tests {
         let packet = packet.unwrap();
         assert_eq!(1, packet.questions.len());
         assert_eq!("google.com", packet.questions[0].q_name.to_string());
-        assert_eq!(RecordType::A, packet.questions[0].q_type);
-        assert_eq!(RecordClass::IN, packet.questions[0].q_class);
+        assert_eq!(QType::A, packet.questions[0].q_type);
+        assert_eq!(QClass::IN, packet.questions[0].q_class);
     }
 
     #[test]
