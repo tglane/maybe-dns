@@ -1,3 +1,5 @@
+use std::convert::TryInto;
+
 use super::{COMPRESSION_MASK, COMPRESSION_MASK_U16};
 use super::error::DnsError;
 

@@ -1,4 +1,5 @@
 use std::mem::size_of;
+use std::convert::TryFrom;
 
 use crate::util::ByteConvertible;
 use super::fqdn::FQDN;

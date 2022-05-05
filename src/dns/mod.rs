@@ -32,6 +32,8 @@ pub use self::error::DnsError;
 
 #[cfg(test)]
 mod tests {
+    use std::convert::{TryInto, TryFrom};
+
     use crate::util::ByteConvertible;
     use super::*;
 
