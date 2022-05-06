@@ -1,6 +1,6 @@
 use std::convert::{TryFrom, TryInto};
 
-use crate::util::ByteConvertible;
+use super::byteconvertible::ByteConvertible;
 use super::header::{Header, OpCode};
 use super::question::{QClass, QType, Question};
 use super::resource::{RecordClass, RecordType, RecordData, ResourceRecord};

@@ -2,7 +2,7 @@ use std::mem::size_of;
 use std::convert::{From, TryFrom, TryInto};
 use std::net::{Ipv4Addr, Ipv6Addr};
 
-use crate::util::ByteConvertible;
+use super::byteconvertible::ByteConvertible;
 use super::fqdn::FQDN;
 use super::util::{resolve_pointer_in_name, get_name_range};
 use super::error::DnsError;

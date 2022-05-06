@@ -1,3 +1,4 @@
+mod byteconvertible;
 mod packet;
 mod question;
 mod header;
@@ -7,8 +8,8 @@ mod error;
 mod util;
 
 
-pub(super) const COMPRESSION_MASK: u8 = 0b1100_0000;
-pub(super) const COMPRESSION_MASK_U16: u16 = 0b1100_0000_0000_0000;
+const COMPRESSION_MASK: u8 = 0b1100_0000;
+const COMPRESSION_MASK_U16: u16 = 0b1100_0000_0000_0000;
 
 
 /// Submodule containing a dns packet
@@ -29,12 +30,14 @@ pub use self::header::{Header, OpCode};
 /// Submodule containing the error type used by this module to represent errors in a consistent way
 pub use self::error::DnsError;
 
+/// Submodule containing a trait for (de-)serializing DNS modules
+pub use self::byteconvertible::ByteConvertible;
+
 
 #[cfg(test)]
 mod tests {
     use std::convert::{TryInto, TryFrom};
 
-    use crate::util::ByteConvertible;
     use super::*;
 
     #[test]

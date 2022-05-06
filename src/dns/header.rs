@@ -3,7 +3,7 @@ use std::convert::{TryFrom, TryInto};
 
 use modular_bitfield::prelude::{B1, B3, B4, bitfield};
 
-use crate::util::ByteConvertible;
+use super::byteconvertible::ByteConvertible;
 use super::error::DnsError;
 
 

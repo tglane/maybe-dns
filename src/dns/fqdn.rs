@@ -1,8 +1,9 @@
 use std::convert::TryFrom;
 
-use crate::util::{ByteConvertible, hash_bytes};
+use super::byteconvertible::ByteConvertible;
 use super::DnsError;
 use super::{COMPRESSION_MASK, COMPRESSION_MASK_U16};
+use super::util::hash_bytes;
 
 #[derive(Clone, Debug)]
 pub struct FQDN {
