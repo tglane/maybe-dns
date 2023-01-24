@@ -1,12 +1,12 @@
 use std::convert::{TryFrom, TryInto};
 
 use super::byteconvertible::ByteConvertible;
+use super::error::DnsError;
+use super::fqdn::FQDN;
 use super::header::{Header, OpCode};
 use super::question::{QClass, QType, Question};
-use super::resource::{RecordClass, RecordType, RecordData, ResourceRecord};
-use super::fqdn::FQDN;
-use super::error::DnsError;
-use super::util::{resolve_pointer_in_name, get_name_range};
+use super::resource::{RecordClass, RecordData, RecordType, ResourceRecord};
+use super::util::{get_name_range, resolve_pointer_in_name};
 
 #[derive(Clone, Debug)]
 pub struct Packet {
@@ -161,54 +161,91 @@ impl TryFrom<&[u8]> for Packet {
         for _ in 0..packet.header.ques_count {
             // Resolve possible pointers in the questions name
             let name_byte_len = get_name_range(&buffer[buffer_idx..])?;
-            let resolved_name_buffer = resolve_pointer_in_name(&buffer[buffer_idx..buffer_idx+name_byte_len], buffer, buffer_idx)?;
+            let resolved_name_buffer = resolve_pointer_in_name(
+                &buffer[buffer_idx..buffer_idx + name_byte_len],
+                buffer,
+                buffer_idx,
+            )?;
             let q_name = FQDN::try_from(&resolved_name_buffer[..])?;
             buffer_idx += name_byte_len;
 
-            let q_type = QType::try_from(u16::from_be_bytes(buffer[buffer_idx..buffer_idx+2].try_into()?))?;
+            let q_type = QType::try_from(u16::from_be_bytes(
+                buffer[buffer_idx..buffer_idx + 2].try_into()?,
+            ))?;
             buffer_idx += 2;
 
-            let q_class = QClass::from(u16::from_be_bytes(buffer[buffer_idx..buffer_idx+2].try_into()?));
+            let q_class = QClass::from(u16::from_be_bytes(
+                buffer[buffer_idx..buffer_idx + 2].try_into()?,
+            ));
             buffer_idx += 2;
 
-            packet.questions.push(Question { q_name, q_type, q_class });
+            packet.questions.push(Question {
+                q_name,
+                q_type,
+                q_class,
+            });
         }
 
         // Closure function to parse records from buffer
-        let parse_record = |buffer: &[u8], buffer_idx: &mut usize| -> Result<ResourceRecord, DnsError> {
+        let parse_record = |buffer: &[u8],
+                            buffer_idx: &mut usize|
+         -> Result<ResourceRecord, DnsError> {
             // Resolve possible pointers in the records name
             let name_byte_len = get_name_range(&buffer[*buffer_idx..])?;
-            let resolved_name_buffer = resolve_pointer_in_name(&buffer[*buffer_idx..*buffer_idx+name_byte_len], buffer, *buffer_idx)?;
+            let resolved_name_buffer = resolve_pointer_in_name(
+                &buffer[*buffer_idx..*buffer_idx + name_byte_len],
+                buffer,
+                *buffer_idx,
+            )?;
             let a_name = FQDN::try_from(&resolved_name_buffer[..])?;
             *buffer_idx += name_byte_len;
 
-            let a_type = RecordType::try_from(u16::from_be_bytes(buffer[*buffer_idx..*buffer_idx+2].try_into()?))?;
+            let a_type = RecordType::try_from(u16::from_be_bytes(
+                buffer[*buffer_idx..*buffer_idx + 2].try_into()?,
+            ))?;
             *buffer_idx += 2;
 
-            let a_class = RecordClass::from(u16::from_be_bytes(buffer[*buffer_idx..*buffer_idx+2].try_into()?));
+            let a_class = RecordClass::from(u16::from_be_bytes(
+                buffer[*buffer_idx..*buffer_idx + 2].try_into()?,
+            ));
             *buffer_idx += 2;
 
-            let time_to_live = u32::from_be_bytes(buffer[*buffer_idx..*buffer_idx+4].try_into()?);
+            let time_to_live = u32::from_be_bytes(buffer[*buffer_idx..*buffer_idx + 4].try_into()?);
             *buffer_idx += 4;
 
-            let data_len = u16::from_be_bytes(buffer[*buffer_idx..*buffer_idx+2].try_into()?);
+            let data_len = u16::from_be_bytes(buffer[*buffer_idx..*buffer_idx + 2].try_into()?);
             *buffer_idx += 2;
 
             let data_end = *buffer_idx + data_len as usize;
-            let rdata = RecordData::extract_from(a_type, &buffer[*buffer_idx..data_end], buffer, *buffer_idx)?;
+            let rdata = RecordData::extract_from(
+                a_type,
+                &buffer[*buffer_idx..data_end],
+                buffer,
+                *buffer_idx,
+            )?;
             *buffer_idx += data_len as usize;
 
-            Ok(ResourceRecord { a_name, a_type, a_class, time_to_live, rdata })
+            Ok(ResourceRecord {
+                a_name,
+                a_type,
+                a_class,
+                time_to_live,
+                rdata,
+            })
         };
 
         for _ in 0..packet.header.ans_count {
             packet.answers.push(parse_record(buffer, &mut buffer_idx)?);
         }
         for _ in 0..packet.header.auth_count {
-            packet.authorities.push(parse_record(buffer, &mut buffer_idx)?);
+            packet
+                .authorities
+                .push(parse_record(buffer, &mut buffer_idx)?);
         }
         for _ in 0..packet.header.add_count {
-            packet.additional.push(parse_record(buffer, &mut buffer_idx)?);
+            packet
+                .additional
+                .push(parse_record(buffer, &mut buffer_idx)?);
         }
 
         Ok(packet)

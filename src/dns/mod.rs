@@ -1,16 +1,14 @@
 mod byteconvertible;
+mod error;
+mod fqdn;
+mod header;
 mod packet;
 mod question;
-mod header;
 mod resource;
-mod fqdn;
-mod error;
 mod util;
-
 
 const COMPRESSION_MASK: u8 = 0b1100_0000;
 const COMPRESSION_MASK_U16: u16 = 0b1100_0000_0000_0000;
-
 
 /// Submodule containing a dns packet
 pub use self::packet::Packet;
@@ -19,7 +17,7 @@ pub use self::packet::Packet;
 pub use self::question::{QClass, QType, Question};
 
 /// Submodule containing dns resource record type and enums for its dns class and dns type
-pub use self::resource::{RecordClass, RecordType, RecordData, ResourceRecord};
+pub use self::resource::{RecordClass, RecordData, RecordType, ResourceRecord};
 
 /// Submodule containing fully qualified domain name (FQDN) type
 pub use self::fqdn::FQDN;
@@ -33,10 +31,9 @@ pub use self::error::DnsError;
 /// Submodule containing a trait for (de-)serializing DNS modules
 pub use self::byteconvertible::ByteConvertible;
 
-
 #[cfg(test)]
 mod tests {
-    use std::convert::{TryInto, TryFrom};
+    use std::convert::{TryFrom, TryInto};
 
     use super::*;
 
@@ -53,7 +50,7 @@ mod tests {
         query.questions.push(Question::with(
             "_srv._udp.local".try_into().unwrap(),
             QType::TXT,
-            QClass::IN
+            QClass::IN,
         ));
         query.questions.push(Question::with(
             "_srv2._udp.local".try_into().unwrap(),

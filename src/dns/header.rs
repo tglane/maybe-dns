@@ -1,11 +1,10 @@
-use std::mem::size_of;
 use std::convert::{TryFrom, TryInto};
+use std::mem::size_of;
 
-use modular_bitfield::prelude::{B1, B3, B4, bitfield};
+use modular_bitfield::prelude::{bitfield, B1, B3, B4};
 
 use super::byteconvertible::ByteConvertible;
 use super::error::DnsError;
-
 
 #[bitfield]
 #[derive(Clone, Debug)]
@@ -20,7 +19,6 @@ pub struct FlagBitfield {
     pub z: B3,
     pub ra: B1,
 }
-
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub enum OpCode {
@@ -40,7 +38,6 @@ impl From<u8> for OpCode {
         }
     }
 }
-
 
 #[derive(Clone, Debug)]
 pub struct Header {
@@ -101,7 +98,11 @@ impl ByteConvertible for Header {
         buffer
     }
 
-    fn to_bytes_compressed(&self, _: &mut std::collections::HashMap<u64, usize>, _: usize) -> Vec<u8> {
+    fn to_bytes_compressed(
+        &self,
+        _: &mut std::collections::HashMap<u64, usize>,
+        _: usize,
+    ) -> Vec<u8> {
         // There is nothing to compress in the header
         self.to_bytes()
     }

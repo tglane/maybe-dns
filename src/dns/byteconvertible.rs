@@ -4,5 +4,9 @@ pub trait ByteConvertible {
 
     fn to_bytes(&self) -> Vec<u8>;
 
-    fn to_bytes_compressed(&self, names: &mut std::collections::HashMap::<u64, usize>, offset: usize) -> Vec<u8>;
+    fn to_bytes_compressed(
+        &self,
+        names: &mut std::collections::HashMap<u64, usize>,
+        offset: usize,
+    ) -> Vec<u8>;
 }

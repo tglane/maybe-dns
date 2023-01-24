@@ -3,7 +3,7 @@ pub mod resolver;
 
 use std::net::SocketAddr;
 
-use crate::dns::{Packet, DnsError};
+use crate::dns::{DnsError, Packet};
 
 pub use resolver::Resolver;
 
@@ -18,7 +18,6 @@ impl Response {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use std::convert::TryFrom;
@@ -29,9 +28,13 @@ mod tests {
     #[test]
     fn oneshot_test() {
         // let responses = oneshot::discovery("_googlecast._tcp.local", &Duration::from_millis(500)).unwrap();
-        let responses = oneshot::discover("_airplay._tcp.local", Duration::from_millis(500)).unwrap();
+        let responses =
+            oneshot::discover("_airplay._tcp.local", Duration::from_millis(500)).unwrap();
         // let responses = oneshot::discovery("lb._dns-sd._udp.local", &Duration::from_millis(500)).unwrap());
-        println!("Discovery finished -- Number of received responses: {}", responses.len());
+        println!(
+            "Discovery finished -- Number of received responses: {}",
+            responses.len()
+        );
         for res in responses.iter() {
             if let Ok(packet) = &res.result {
                 let serialized = packet.to_bytes();
@@ -45,8 +48,12 @@ mod tests {
                 }
 
                 let compressed = packet.to_bytes_compressed();
-                let compressed_deserialized = Packet::try_from(&compressed[..]).expect("Failed to parse");
-                assert_eq!(compressed_deserialized.byte_size(), desrerialized.byte_size());
+                let compressed_deserialized =
+                    Packet::try_from(&compressed[..]).expect("Failed to parse");
+                assert_eq!(
+                    compressed_deserialized.byte_size(),
+                    desrerialized.byte_size()
+                );
                 let compressed_uncompressed = compressed_deserialized.to_bytes();
 
                 assert_eq!(compressed_deserialized.byte_size(), packet.byte_size());
@@ -65,7 +72,10 @@ mod tests {
         resolver.wait();
 
         for _ in 0..resolver.len() {
-            println!("Resolve response: {}", resolver.consume_next().unwrap().peer);
+            println!(
+                "Resolve response: {}",
+                resolver.consume_next().unwrap().peer
+            );
         }
     }
 }
