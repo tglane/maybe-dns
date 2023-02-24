@@ -12,9 +12,7 @@ pub(super) fn resolve_pointer_in_name(
     let idx = range.len() - 2;
     if range[idx] & COMPRESSION_MASK == COMPRESSION_MASK {
         let offset = (u16::from_be_bytes(
-            buffer[start_in_buffer + idx..start_in_buffer + idx + 2]
-                .try_into()
-                .unwrap(),
+            buffer[start_in_buffer + idx..start_in_buffer + idx + 2].try_into()?,
         ) & !COMPRESSION_MASK_U16) as usize;
         if offset < start_in_buffer {
             let resolved_pointer = resolve_pointer_impl(buffer, offset)?;

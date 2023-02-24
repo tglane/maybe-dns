@@ -8,7 +8,6 @@ use super::{COMPRESSION_MASK, COMPRESSION_MASK_U16};
 #[derive(Clone, Debug)]
 pub struct FQDN {
     data: Vec<Vec<u8>>,
-
     // data: String,
     // sliced_data: Vec<&'a [u8]>,
 }
@@ -46,7 +45,8 @@ impl FQDN {
     pub fn to_string(&self) -> String {
         let mut name = String::new();
         for (idx, name_part) in self.iter().enumerate() {
-            name.push_str(std::str::from_utf8(name_part).unwrap());
+            // Safe because the u8 in self.data are parsed from a &str in the constructor
+            name.push_str(unsafe { std::str::from_utf8_unchecked(name_part) });
             if idx + 1 != self.data.len() {
                 name.push('.');
             }

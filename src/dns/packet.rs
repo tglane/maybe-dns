@@ -95,6 +95,8 @@ impl Packet {
 
         // Set correct number of element into the header
         let mut ptr = bin.as_mut_ptr() as *mut u16;
+        // Safe to dereference the pointer because the vector the pointer points to
+        // was created with the expected capacity beforehand
         unsafe {
             ptr = ptr.offset(2);
             *ptr = (self.questions.len() as u16).to_be();
