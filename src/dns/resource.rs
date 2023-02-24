@@ -646,15 +646,15 @@ pub struct ResourceRecord {
 }
 
 impl ResourceRecord {
-    pub fn with(
-        a_name: &str,
+    pub fn new(
+        a_name: FQDN,
         a_type: RecordType,
         a_class: RecordClass,
         ttl: u32,
         rdata: RecordData,
     ) -> Self {
         ResourceRecord {
-            a_name: FQDN::with(a_name),
+            a_name,
             a_type,
             a_class,
             time_to_live: ttl,

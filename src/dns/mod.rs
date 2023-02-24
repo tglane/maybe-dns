@@ -33,7 +33,7 @@ pub use self::byteconvertible::ByteConvertible;
 
 #[cfg(test)]
 mod tests {
-    use std::convert::{TryFrom, TryInto};
+    use std::convert::TryFrom;
 
     use super::*;
 
@@ -47,13 +47,13 @@ mod tests {
     #[test]
     fn build_query_correct() {
         let mut query = Packet::new();
-        query.questions.push(Question::with(
-            "_srv._udp.local".try_into().unwrap(),
+        query.questions.push(Question::new(
+            FQDN::new("_srv._udp.local"),
             QType::TXT,
             QClass::IN,
         ));
-        query.questions.push(Question::with(
-            "_srv2._udp.local".try_into().unwrap(),
+        query.questions.push(Question::new(
+            FQDN::new("_srv2._udp.local"),
             QType::TXT,
             QClass::IN,
         ));

@@ -144,6 +144,18 @@ impl Packet {
     }
 }
 
+impl Default for Packet {
+    fn default() -> Self {
+        Self {
+            header: Header::new_query(0, false),
+            questions: Vec::new(),
+            answers: Vec::new(),
+            authorities: Vec::new(),
+            additional: Vec::new(),
+        }
+    }
+}
+
 impl TryFrom<&[u8]> for Packet {
     type Error = DnsError;
 

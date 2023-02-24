@@ -7,11 +7,14 @@ use super::{COMPRESSION_MASK, COMPRESSION_MASK_U16};
 
 #[derive(Clone, Debug)]
 pub struct FQDN {
-    pub(super) data: Vec<Vec<u8>>,
+    data: Vec<Vec<u8>>,
+
+    // data: String,
+    // sliced_data: Vec<&'a [u8]>,
 }
 
 impl FQDN {
-    pub fn with(name: &str) -> Self {
+    pub fn new(name: &str) -> Self {
         let mut data = Vec::<Vec<u8>>::new();
 
         let mut part_start = 0;
@@ -24,6 +27,21 @@ impl FQDN {
 
         Self { data }
     }
+
+    // pub fn new(name: String) -> Self {
+    //     let data = name;
+    //     let mut sliced_data = Vec::new();
+
+    //     let mut part_start = 0;
+    //     for idx in 0..name.len() + 1 {
+    //         if idx == name.len() || name.as_bytes()[idx] == '.' as u8 {
+    //             sliced_data.push(name[part_start..idx].as_bytes());
+    //             part_start = idx + 1;
+    //         }
+    //     }
+
+    //     Self { data, sliced_data }
+    // }
 
     pub fn to_string(&self) -> String {
         let mut name = String::new();
@@ -97,7 +115,7 @@ impl ByteConvertible for FQDN {
 impl TryFrom<&[u8]> for FQDN {
     type Error = DnsError;
 
-    fn try_from(buffer: &[u8]) -> Result<Self, DnsError> {
+    fn try_from(buffer: &[u8]) -> Result<Self, Self::Error> {
         let mut pos = 0_usize;
         let mut data = Vec::<Vec<u8>>::new();
 
