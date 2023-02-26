@@ -1,4 +1,4 @@
-use std::convert::TryFrom;
+use std::convert::{From, TryFrom};
 
 use super::byteconvertible::ByteConvertible;
 use super::util::hash_bytes;
@@ -8,8 +8,6 @@ use super::{COMPRESSION_MASK, COMPRESSION_MASK_U16};
 #[derive(Clone, Debug)]
 pub struct FQDN {
     data: Vec<Vec<u8>>,
-    // data: String,
-    // sliced_data: Vec<&'a [u8]>,
 }
 
 impl FQDN {
@@ -27,23 +25,9 @@ impl FQDN {
         Self { data }
     }
 
-    // pub fn new(name: String) -> Self {
-    //     let data = name;
-    //     let mut sliced_data = Vec::new();
-
-    //     let mut part_start = 0;
-    //     for idx in 0..name.len() + 1 {
-    //         if idx == name.len() || name.as_bytes()[idx] == '.' as u8 {
-    //             sliced_data.push(name[part_start..idx].as_bytes());
-    //             part_start = idx + 1;
-    //         }
-    //     }
-
-    //     Self { data, sliced_data }
-    // }
-
     pub fn to_string(&self) -> String {
         let mut name = String::new();
+
         for (idx, name_part) in self.iter().enumerate() {
             // Safe because the u8 in self.data are parsed from a &str in the constructor
             name.push_str(unsafe { std::str::from_utf8_unchecked(name_part) });
@@ -51,6 +35,7 @@ impl FQDN {
                 name.push('.');
             }
         }
+
         name
     }
 
@@ -109,6 +94,16 @@ impl ByteConvertible for FQDN {
         }
 
         buffer
+    }
+}
+
+impl From<&[&str]> for FQDN {
+    fn from(value: &[&str]) -> Self {
+        let data = value
+            .iter()
+            .map(|str_part| str_part.as_bytes().to_vec())
+            .collect::<Vec<Vec<u8>>>();
+        Self { data }
     }
 }
 

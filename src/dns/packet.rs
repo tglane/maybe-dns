@@ -48,10 +48,10 @@ impl Packet {
         }
     }
 
-    pub fn with_question(id: u16, rc: bool, question: &Question) -> Self {
+    pub fn with_question(id: u16, rc: bool, question: Question) -> Self {
         Packet {
             header: Header::new_query(id, rc),
-            questions: vec![question.clone()],
+            questions: vec![question],
             answers: Vec::new(),
             authorities: Vec::new(),
             additional: Vec::new(),

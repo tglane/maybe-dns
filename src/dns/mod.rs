@@ -53,7 +53,7 @@ mod tests {
             QClass::IN,
         ));
         query.questions.push(Question::new(
-            FQDN::new("_srv2._udp.local"),
+            FQDN::from(&["_srv2", "_udp", "local"][..]),
             QType::TXT,
             QClass::IN,
         ));

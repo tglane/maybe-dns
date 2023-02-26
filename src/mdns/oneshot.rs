@@ -19,7 +19,7 @@ pub fn discover(record_name: &str, delay: Duration) -> Result<Vec<Response>, Dns
     let dns_query = Packet::with_question(
         packet_id,
         false,
-        &Question::with(record_name, QType::PTR, QClass::IN),
+        Question::with(record_name, QType::PTR, QClass::IN),
     );
 
     // Init connection
