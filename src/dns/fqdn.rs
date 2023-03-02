@@ -1,6 +1,6 @@
 use std::convert::{From, TryFrom};
 
-use super::byteconvertible::ByteConvertible;
+use super::byteconvertible::{ByteConvertible, CompressedByteConvertible};
 use super::util::hash_bytes;
 use super::DnsError;
 use super::{COMPRESSION_MASK, COMPRESSION_MASK_U16};
@@ -64,7 +64,9 @@ impl ByteConvertible for FQDN {
         buffer.push(0);
         buffer
     }
+}
 
+impl CompressedByteConvertible for FQDN {
     fn to_bytes_compressed(
         &self,
         names: &mut std::collections::HashMap<u64, usize>,

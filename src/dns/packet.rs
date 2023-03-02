@@ -1,6 +1,6 @@
 use std::convert::{TryFrom, TryInto};
 
-use super::byteconvertible::ByteConvertible;
+use super::byteconvertible::{ByteConvertible, CompressedByteConvertible};
 use super::error::DnsError;
 use super::fqdn::FQDN;
 use super::header::{Header, OpCode};
@@ -58,7 +58,42 @@ impl Packet {
         }
     }
 
-    pub fn byte_size(&self) -> usize {
+    pub fn to_bytes_compressed(&self) -> Vec<u8> {
+        let mut used_fqdn = std::collections::HashMap::<u64, usize>::new();
+
+        let mut bin = self.header.to_bytes();
+
+        for ques in self.questions.iter() {
+            bin.extend_from_slice(&ques.to_bytes_compressed(&mut used_fqdn, bin.len()));
+        }
+        for rec in self.answers.iter() {
+            bin.extend_from_slice(&rec.to_bytes_compressed(&mut used_fqdn, bin.len()));
+        }
+        for rec in self.authorities.iter() {
+            bin.extend_from_slice(&rec.to_bytes_compressed(&mut used_fqdn, bin.len()));
+        }
+        for rec in self.additional.iter() {
+            bin.extend_from_slice(&rec.to_bytes_compressed(&mut used_fqdn, bin.len()));
+        }
+
+        bin
+    }
+}
+
+impl Default for Packet {
+    fn default() -> Self {
+        Self {
+            header: Header::new_query(0, false),
+            questions: Vec::new(),
+            answers: Vec::new(),
+            authorities: Vec::new(),
+            additional: Vec::new(),
+        }
+    }
+}
+
+impl ByteConvertible for Packet {
+    fn byte_size(&self) -> usize {
         let mut size = Header::SIZE;
         for ques in self.questions.iter() {
             size += ques.byte_size();
@@ -75,7 +110,7 @@ impl Packet {
         size
     }
 
-    pub fn to_bytes(&self) -> Vec<u8> {
+    fn to_bytes(&self) -> Vec<u8> {
         let mut byte_len = self.header.byte_size();
         for ques in self.questions.iter() {
             byte_len += ques.byte_size();
@@ -122,39 +157,6 @@ impl Packet {
         }
 
         bin
-    }
-
-    pub fn to_bytes_compressed(&self) -> Vec<u8> {
-        let mut used_fqdn = std::collections::HashMap::<u64, usize>::new();
-
-        let mut bin = self.header.to_bytes();
-
-        for ques in self.questions.iter() {
-            bin.extend_from_slice(&ques.to_bytes_compressed(&mut used_fqdn, bin.len()));
-        }
-        for rec in self.answers.iter() {
-            bin.extend_from_slice(&rec.to_bytes_compressed(&mut used_fqdn, bin.len()));
-        }
-        for rec in self.authorities.iter() {
-            bin.extend_from_slice(&rec.to_bytes_compressed(&mut used_fqdn, bin.len()));
-        }
-        for rec in self.additional.iter() {
-            bin.extend_from_slice(&rec.to_bytes_compressed(&mut used_fqdn, bin.len()));
-        }
-
-        bin
-    }
-}
-
-impl Default for Packet {
-    fn default() -> Self {
-        Self {
-            header: Header::new_query(0, false),
-            questions: Vec::new(),
-            answers: Vec::new(),
-            authorities: Vec::new(),
-            additional: Vec::new(),
-        }
     }
 }
 

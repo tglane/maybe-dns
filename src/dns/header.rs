@@ -3,7 +3,7 @@ use std::mem::size_of;
 
 use modular_bitfield::prelude::{bitfield, B1, B3, B4};
 
-use super::byteconvertible::ByteConvertible;
+use super::byteconvertible::{ByteConvertible, CompressedByteConvertible};
 use super::error::DnsError;
 
 #[bitfield]
@@ -97,7 +97,9 @@ impl ByteConvertible for Header {
         buffer.extend_from_slice(&u16::to_be_bytes(self.add_count));
         buffer
     }
+}
 
+impl CompressedByteConvertible for Header {
     fn to_bytes_compressed(
         &self,
         _: &mut std::collections::HashMap<u64, usize>,

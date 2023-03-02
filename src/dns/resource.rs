@@ -2,7 +2,7 @@ use std::convert::{From, TryFrom, TryInto};
 use std::mem::size_of;
 use std::net::{Ipv4Addr, Ipv6Addr};
 
-use super::byteconvertible::ByteConvertible;
+use super::byteconvertible::{ByteConvertible, CompressedByteConvertible};
 use super::error::DnsError;
 use super::fqdn::FQDN;
 use super::util::{get_name_range, resolve_pointer_in_name};
@@ -533,7 +533,9 @@ impl ByteConvertible for RecordData {
             }
         }
     }
+}
 
+impl CompressedByteConvertible for RecordData {
     fn to_bytes_compressed(
         &self,
         names: &mut std::collections::HashMap<u64, usize>,
@@ -687,7 +689,9 @@ impl ByteConvertible for ResourceRecord {
         buffer.extend_from_slice(&self.rdata.to_bytes());
         buffer
     }
+}
 
+impl CompressedByteConvertible for ResourceRecord {
     fn to_bytes_compressed(
         &self,
         names: &mut std::collections::HashMap<u64, usize>,
