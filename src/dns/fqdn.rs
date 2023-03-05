@@ -5,7 +5,7 @@ use super::util::hash_bytes;
 use super::DnsError;
 use super::{COMPRESSION_MASK, COMPRESSION_MASK_U16};
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct FQDN {
     data: Vec<Vec<u8>>,
 }

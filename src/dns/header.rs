@@ -1,49 +1,16 @@
 use std::convert::{TryFrom, TryInto};
-use std::mem::size_of;
+use std::mem::{size_of, transmute};
 
 use modular_bitfield::prelude::{bitfield, B1, B3, B4};
 
 use super::byteconvertible::{ByteConvertible, CompressedByteConvertible};
 use super::error::DnsError;
 
-#[bitfield]
-#[derive(Clone, Debug)]
-pub struct FlagBitfield {
-    pub rd: B1,
-    pub tc: B1,
-    pub aa: B1,
-    pub opcode: B4,
-    pub qr: B1,
-
-    pub rcode: B4,
-    pub z: B3,
-    pub ra: B1,
-}
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
-pub enum OpCode {
-    StandardQuery = 0,
-    InverseQuery = 1,
-    ServerStatusRequest = 2,
-    Reserved,
-}
-
-impl From<u8> for OpCode {
-    fn from(code: u8) -> Self {
-        match code {
-            0 => OpCode::StandardQuery,
-            1 => OpCode::InverseQuery,
-            2 => OpCode::ServerStatusRequest,
-            _ => OpCode::Reserved,
-        }
-    }
-}
-
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct Header {
-    pub id: u16,
+    pub(super) id: u16,
 
-    pub flags: FlagBitfield,
+    flags: FlagBitfield,
 
     pub(super) ques_count: u16,
     pub(super) ans_count: u16,
@@ -54,10 +21,14 @@ pub struct Header {
 impl Header {
     pub(super) const SIZE: usize = size_of::<Self>();
 
-    pub fn new_query(id: u16, rd: bool) -> Self {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn new_query(id: u16, recursion_desired: bool) -> Self {
         let flags = FlagBitfield::new()
             .with_opcode(OpCode::StandardQuery as u8)
-            .with_rd(rd as u8);
+            .with_rd(recursion_desired as u8);
 
         Self {
             id,
@@ -70,7 +41,9 @@ impl Header {
     }
 
     pub fn new_reply(id: u16, opcode: OpCode) -> Self {
-        let flags = FlagBitfield::new().with_opcode(opcode as u8);
+        let flags = FlagBitfield::new()
+            .with_opcode(opcode as u8)
+            .with_qr(1);
         Self {
             id,
             flags,
@@ -79,6 +52,76 @@ impl Header {
             auth_count: 0,
             add_count: 0,
         }
+    }
+
+    pub fn recursion_desired(&self) -> bool {
+        // SAFETY: rd is only set through set_rd function of constructor from a bool
+        unsafe { transmute(self.flags.rd()) }
+    }
+
+    pub fn set_recursion_desired(&mut self, rd: bool) {
+        // SAFETY: rd is represented by a single bit in the bitfield
+        self.flags.set_rd(unsafe { transmute(rd) });
+    }
+
+    pub fn truncation(&self) -> bool {
+        // SAFETY: tc is only set through set_rd function of constructor from a bool
+        unsafe { transmute(self.flags.tc()) }
+    }
+
+    pub fn set_truncation(&mut self, tc: bool) {
+        // SAFETY: tc is represented by a single bit in the bitfield
+        self.flags.set_tc(unsafe { transmute(tc) });
+    }
+
+    pub fn authoritative_answer(&self) -> bool {
+        // SAFETY: aa is only set through set_rd function of constructor from a bool
+        unsafe { transmute(self.flags.aa()) }
+    }
+
+    pub fn set_authoritative_answer(&mut self, aa: bool) {
+        // SAFETY: aa is represented by a single bit in the bitfield
+        self.flags.set_aa(unsafe { transmute(aa) });
+    }
+
+    pub fn opcode(&self) -> OpCode {
+        OpCode::from(self.flags.opcode())
+    }
+
+    pub fn set_opcode(&mut self, opcode: OpCode) {
+        // SAFETY: opcode enum is represented by a four bits in the bitfield and can only be set
+        // from the constructor in a controlled way
+        self.flags.set_opcode(unsafe { transmute(opcode) });
+    }
+
+    pub fn query_response(&self) -> bool {
+        // SAFETY: qr is only set through set_rd function of constructor from a bool
+        unsafe { transmute(self.flags.qr()) }
+    }
+
+    pub fn set_query_response(&mut self, qr: bool) {
+        // SAFETY: qr is represented by a single bit in the bitfield
+        self.flags.set_qr(unsafe { transmute(qr) })
+    }
+
+    pub fn response_code(&self) -> ResponseCode {
+        ResponseCode::try_from(self.flags.rcode()).unwrap()
+    }
+
+    pub fn set_response_code(&mut self, response_code: ResponseCode) {
+        // SAFETY: opcode enum is represented by a four bits in the bitfield and can only be set
+        // from the constructor in a controlled way
+        self.flags.set_rcode(unsafe { transmute(response_code) });
+    }
+
+    pub fn recursion_available(&self) -> bool {
+        // SAFETY: ra is only set through set_rd function of constructor from a bool
+        unsafe { transmute(self.flags.ra()) }
+    }
+
+    pub fn set_recursion_available(&mut self, ra: bool) {
+        // SAFETY: ra is represented by a single bit in the bitfield
+        self.flags.set_ra(unsafe { transmute(ra) });
     }
 }
 
@@ -122,5 +165,77 @@ impl TryFrom<&[u8; 12]> for Header {
             auth_count: u16::from_be_bytes(buffer[8..10].try_into()?),
             add_count: u16::from_be_bytes(buffer[10..12].try_into()?),
         })
+    }
+}
+
+#[bitfield]
+#[derive(Clone, Debug, Default)]
+pub struct FlagBitfield {
+    rd: B1,
+    tc: B1,
+    aa: B1,
+    opcode: B4,
+    qr: B1,
+
+    rcode: B4,
+    #[allow(unused)]
+    z: B3,
+    ra: B1,
+}
+
+#[repr(u8)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+pub enum OpCode {
+    StandardQuery = 0,
+    InverseQuery = 1,
+    ServerStatusRequest = 2,
+    Reserved,
+}
+
+impl From<u8> for OpCode {
+    fn from(code: u8) -> Self {
+        match code {
+            0 => OpCode::StandardQuery,
+            1 => OpCode::InverseQuery,
+            2 => OpCode::ServerStatusRequest,
+            _ => OpCode::Reserved,
+        }
+    }
+}
+
+#[repr(u8)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+pub enum ResponseCode {
+    NoError = 0,
+    FormatError = 1,
+    ServerFailure = 2,
+    NameError = 3,
+    NotImplemented = 4,
+    Refused = 5,
+    YXDomain = 6,
+    YXRRSet = 7,
+    NXRRSet = 8,
+    NotAuth = 9,
+    NotZone = 10,
+}
+
+impl TryFrom<u8> for ResponseCode {
+    type Error = DnsError;
+
+    fn try_from(code: u8) -> Result<Self, DnsError> {
+        match code {
+            0 => Ok(ResponseCode::NoError),
+            1 => Ok(ResponseCode::FormatError),
+            2 => Ok(ResponseCode::ServerFailure),
+            3 => Ok(ResponseCode::NameError),
+            4 => Ok(ResponseCode::NotImplemented),
+            5 => Ok(ResponseCode::Refused),
+            6 => Ok(ResponseCode::YXDomain),
+            7 => Ok(ResponseCode::YXRRSet),
+            8 => Ok(ResponseCode::NXRRSet),
+            9 => Ok(ResponseCode::NotAuth),
+            10 => Ok(ResponseCode::NotZone),
+            _ => Err(DnsError::InvalidResponseCode(code)),
+        }
     }
 }

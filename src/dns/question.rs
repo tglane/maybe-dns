@@ -14,22 +14,23 @@ pub enum QClass {
     HS = 4,
 
     // Unique class for Question records
+    NONE = 254,
     ANY = 255,
-
-    // No valid class
-    Unassigned,
 }
 
-impl From<u16> for QClass {
-    fn from(number: u16) -> Self {
+impl TryFrom<u16> for QClass {
+    type Error = DnsError;
+
+    fn try_from(number: u16) -> Result<Self, DnsError> {
         let number = number & 0b01111111_11111111;
         match number {
-            1 => QClass::IN,
-            2 => QClass::CS,
-            3 => QClass::CH,
-            4 => QClass::HS,
-            255 => QClass::ANY,
-            _ => QClass::Unassigned,
+            1 => Ok(QClass::IN),
+            2 => Ok(QClass::CS),
+            3 => Ok(QClass::CH),
+            4 => Ok(QClass::HS),
+            254 => Ok(QClass::NONE),
+            255 => Ok(QClass::ANY),
+            _ => Err(DnsError::InvalidClass(number)),
         }
     }
 }

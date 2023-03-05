@@ -13,18 +13,19 @@ pub enum RecordClass {
     CS = 2,
     CH = 3,
     HS = 4,
-    Unassigned,
 }
 
-impl From<u16> for RecordClass {
-    fn from(number: u16) -> Self {
+impl TryFrom<u16> for RecordClass {
+    type Error = DnsError;
+
+    fn try_from(number: u16) -> Result<Self, DnsError> {
         let number = number & 0b01111111_11111111;
         match number {
-            1 => RecordClass::IN,
-            2 => RecordClass::CS,
-            3 => RecordClass::CH,
-            4 => RecordClass::HS,
-            _ => RecordClass::Unassigned,
+            1 => Ok(RecordClass::IN),
+            2 => Ok(RecordClass::CS),
+            3 => Ok(RecordClass::CH),
+            4 => Ok(RecordClass::HS),
+            _ => Err(DnsError::InvalidClass(number)),
         }
     }
 }

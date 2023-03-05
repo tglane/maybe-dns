@@ -2,6 +2,7 @@
 pub enum DnsError {
     InvalidClass(u16),
     InvalidType(u16),
+    InvalidResponseCode(u8),
     InvalidPacketData,
     LengthViolation,
     UnresolveableCompressionPointer,
