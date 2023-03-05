@@ -41,9 +41,7 @@ impl Header {
     }
 
     pub fn new_reply(id: u16, opcode: OpCode) -> Self {
-        let flags = FlagBitfield::new()
-            .with_opcode(opcode as u8)
-            .with_qr(1);
+        let flags = FlagBitfield::new().with_opcode(opcode as u8).with_qr(1);
         Self {
             id,
             flags,
@@ -101,7 +99,16 @@ impl Header {
 
     pub fn set_query_response(&mut self, qr: bool) {
         // SAFETY: qr is represented by a single bit in the bitfield
-        self.flags.set_qr(unsafe { transmute(qr) })
+        self.flags.set_qr(unsafe { transmute(qr) });
+
+        // Some fields can only be set by a server
+        if !qr {
+            self.flags.set_ra(0);
+            // SAFETY: opcode enum is represented by a four bits in the bitfield and can only be set
+            // from the constructor in a controlled way
+            self.flags
+                .set_rcode(unsafe { transmute(ResponseCode::NoError) });
+        }
     }
 
     pub fn response_code(&self) -> ResponseCode {
@@ -112,6 +119,11 @@ impl Header {
         // SAFETY: opcode enum is represented by a four bits in the bitfield and can only be set
         // from the constructor in a controlled way
         self.flags.set_rcode(unsafe { transmute(response_code) });
+
+        // Only set by a server
+        if response_code != ResponseCode::NoError {
+            self.flags.set_qr(1);
+        }
     }
 
     pub fn recursion_available(&self) -> bool {
@@ -122,6 +134,11 @@ impl Header {
     pub fn set_recursion_available(&mut self, ra: bool) {
         // SAFETY: ra is represented by a single bit in the bitfield
         self.flags.set_ra(unsafe { transmute(ra) });
+
+        // Only set by a server
+        if ra {
+            self.flags.set_qr(1);
+        }
     }
 }
 
@@ -171,15 +188,24 @@ impl TryFrom<&[u8; 12]> for Header {
 #[bitfield]
 #[derive(Clone, Debug, Default)]
 pub struct FlagBitfield {
+    /// Recursion desired is set by a client to indicate the client wants the server to recursively
+    /// query further server by itself
     rd: B1,
+    /// Truncation bit indicates messages that are too large to be sent in a single message
     tc: B1,
+    /// Authoritative answer is only set by a server and indicates that it is authoritative
+    /// responsible for the queried domains
     aa: B1,
+    /// Opcode is set by the client and copied into the answer and indicates the query type
     opcode: B4,
+    /// Query/Response Bit indicates wether this is a query (0) or a response (1)
     qr: B1,
-
+    /// Response code is only set in responses to give information about the type of answer
     rcode: B4,
+    /// Reserved/Unused
     #[allow(unused)]
     z: B3,
+    /// Recursion available is set by the server to indicate its capability to handle queries recursively
     ra: B1,
 }
 
