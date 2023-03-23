@@ -641,11 +641,13 @@ impl CompressedByteConvertible for RecordData {
 
 #[derive(Clone, Debug)]
 pub struct ResourceRecord {
-    pub a_name: FQDN,
-    pub a_type: RecordType,
-    pub a_class: RecordClass,
-    pub time_to_live: u32,
-    pub rdata: RecordData,
+    pub(super) a_name: FQDN,
+    pub(super) a_type: RecordType,
+    #[cfg(feature = "mdns")]
+    pub(super) cache_flush: bool,
+    pub(super) a_class: RecordClass,
+    pub(super) time_to_live: u32,
+    pub(super) rdata: RecordData,
 }
 
 impl ResourceRecord {
@@ -659,13 +661,65 @@ impl ResourceRecord {
         ResourceRecord {
             a_name,
             a_type,
+            #[cfg(feature = "mdns")]
+            cache_flush: false,
             a_class,
             time_to_live: ttl,
             rdata,
         }
     }
 
-    pub fn get_data_raw(&self) -> Vec<u8> {
+    pub fn name(&self) -> &FQDN {
+        &self.a_name
+    }
+
+    pub fn set_name(&mut self, name: FQDN) {
+        self.a_name = name;
+    }
+
+    pub fn record_type(&self) -> &RecordType {
+        &self.a_type
+    }
+
+    pub fn set_record_type(&mut self, record_type: RecordType) {
+        self.a_type = record_type;
+    }
+
+    #[cfg(feature = "mdns")]
+    pub fn cache_flush(&self) -> bool {
+        self.cache_flush
+    }
+
+    #[cfg(feature = "mdns")]
+    pub fn set_cache_flush(&mut self, flush: bool) {
+        self.cache_flush = flush;
+    }
+
+    pub fn class(&self) -> &RecordClass {
+        &self.a_class
+    }
+
+    pub fn set_class(&mut self, class: RecordClass) {
+        self.a_class = class;
+    }
+
+    pub fn time_to_live(&self) -> u32 {
+        self.time_to_live
+    }
+
+    pub fn set_time_to_live(&mut self, ttl: u32) {
+        self.time_to_live = ttl;
+    }
+
+    pub fn data(&self) -> &RecordData {
+        &self.rdata
+    }
+
+    pub fn set_data(&mut self, data: RecordData) {
+        self.rdata = data;
+    }
+
+    pub fn data_raw(&self) -> Vec<u8> {
         self.rdata.to_bytes()
     }
 }
@@ -684,10 +738,26 @@ impl ByteConvertible for ResourceRecord {
         let mut buffer = Vec::with_capacity(self.byte_size());
         buffer.extend_from_slice(&self.a_name.to_bytes());
         buffer.extend_from_slice(&u16::to_be_bytes(self.a_type as u16));
+
+        #[cfg(not(feature = "mdns"))]
         buffer.extend_from_slice(&u16::to_be_bytes(self.a_class as u16));
+        #[cfg(feature = "mdns")]
+        {
+            let fused_last_byte = if self.cache_flush {
+                const MDNS_ENABLE_CACHE_FLUSH: u16 = 1 << 15;
+                self.a_class as u16 | MDNS_ENABLE_CACHE_FLUSH
+            } else {
+                self.a_class as u16
+            };
+            buffer.extend_from_slice(&u16::to_be_bytes(fused_last_byte));
+        }
+
         buffer.extend_from_slice(&u32::to_be_bytes(self.time_to_live));
+
         buffer.extend_from_slice(&u16::to_be_bytes(self.rdata.byte_size() as u16));
+
         buffer.extend_from_slice(&self.rdata.to_bytes());
+
         buffer
     }
 }
@@ -701,15 +771,29 @@ impl CompressedByteConvertible for ResourceRecord {
         let mut buffer = Vec::new();
 
         buffer.extend_from_slice(&self.a_name.to_bytes_compressed(names, offset));
+
         buffer.extend_from_slice(&u16::to_be_bytes(self.a_type as u16));
+
+        #[cfg(not(feature = "mdns"))]
         buffer.extend_from_slice(&u16::to_be_bytes(self.a_class as u16));
+        #[cfg(feature = "mdns")]
+        {
+            let fused_last_byte = if self.cache_flush {
+                const MDNS_UNICAST_RESPONSE: u16 = 1 << 15;
+                self.a_class as u16 | MDNS_UNICAST_RESPONSE
+            } else {
+                self.a_class as u16
+            };
+            buffer.extend_from_slice(&u16::to_be_bytes(fused_last_byte));
+        }
+
         buffer.extend_from_slice(&u32::to_be_bytes(self.time_to_live));
 
         let compressed_rdata = self
             .rdata
             .to_bytes_compressed(names, offset + buffer.len() + 2);
-
         buffer.extend_from_slice(&u16::to_be_bytes(compressed_rdata.len() as u16));
+
         buffer.extend_from_slice(&compressed_rdata);
 
         buffer

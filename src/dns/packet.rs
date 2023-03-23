@@ -322,15 +322,28 @@ impl TryFrom<&[u8]> for Packet {
             ))?;
             buffer_idx += 2;
 
+            #[cfg(not(feature = "mdns"))]
             let q_class = QClass::try_from(u16::from_be_bytes(
                 buffer[buffer_idx..buffer_idx + 2].try_into()?,
             ))?;
+            #[cfg(feature = "mdns")]
+            let (q_class, unicast_response) = {
+                const MDNS_UNICAST_RESPONSE: u16 = 1 << 15;
+                let bin_val = u16::from_be_bytes(buffer[buffer_idx..buffer_idx + 2].try_into()?);
+                if bin_val & MDNS_UNICAST_RESPONSE > 0 {
+                    (QClass::try_from(bin_val & !MDNS_UNICAST_RESPONSE)?, true)
+                } else {
+                    (QClass::try_from(bin_val)?, false)
+                }
+            };
             buffer_idx += 2;
 
             packet.questions.push(Question {
                 q_name,
                 q_type,
                 q_class,
+                #[cfg(feature = "mdns")]
+                unicast_response,
             });
         }
 
@@ -353,9 +366,21 @@ impl TryFrom<&[u8]> for Packet {
             ))?;
             *buffer_idx += 2;
 
+            #[cfg(not(feature = "mdns"))]
             let a_class = RecordClass::try_from(u16::from_be_bytes(
                 buffer[*buffer_idx..*buffer_idx + 2].try_into()?,
             ))?;
+            #[cfg(feature = "mdns")]
+            let (a_class, cache_flush) = {
+                const MDNS_ENABLE_CACHE_FLUSH: u16 = 1 << 15;
+                let bin_val = u16::from_be_bytes(buffer[*buffer_idx..*buffer_idx + 2].try_into()?);
+                if bin_val & MDNS_ENABLE_CACHE_FLUSH > 0 {
+                    let class_val = bin_val & !MDNS_ENABLE_CACHE_FLUSH;
+                    (RecordClass::try_from(class_val)?, true)
+                } else {
+                    (RecordClass::try_from(bin_val)?, false)
+                }
+            };
             *buffer_idx += 2;
 
             let time_to_live = u32::from_be_bytes(buffer[*buffer_idx..*buffer_idx + 4].try_into()?);
@@ -376,6 +401,8 @@ impl TryFrom<&[u8]> for Packet {
             Ok(ResourceRecord {
                 a_name,
                 a_type,
+                #[cfg(feature = "mdns")]
+                cache_flush,
                 a_class,
                 time_to_live,
                 rdata,

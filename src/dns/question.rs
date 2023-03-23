@@ -89,9 +89,11 @@ impl TryFrom<u16> for QType {
 }
 #[derive(Clone, Debug)]
 pub struct Question {
-    pub q_name: FQDN,
-    pub q_type: QType,
-    pub q_class: QClass,
+    pub(super) q_name: FQDN,
+    pub(super) q_type: QType,
+    pub(super) q_class: QClass,
+    #[cfg(feature = "mdns")]
+    pub(super) unicast_response: bool,
 }
 
 impl Question {
@@ -100,7 +102,43 @@ impl Question {
             q_name,
             q_type,
             q_class,
+            #[cfg(feature = "mdns")]
+            unicast_response: false,
         }
+    }
+
+    pub fn name(&self) -> &FQDN {
+        &self.q_name
+    }
+
+    pub fn set_name(&mut self, name: FQDN) {
+        self.q_name = name;
+    }
+
+    pub fn query_type(&self) -> &QType {
+        &self.q_type
+    }
+
+    pub fn set_query_type(&mut self, query_type: QType) {
+        self.q_type = query_type;
+    }
+
+    pub fn class(&self) -> &QClass {
+        &self.q_class
+    }
+
+    pub fn set_class(&mut self, class: QClass) {
+        self.q_class = class;
+    }
+
+    #[cfg(feature = "mdns")]
+    pub fn unicast_response(&self) -> bool {
+        self.unicast_response
+    }
+
+    #[cfg(feature = "mdns")]
+    pub fn set_unicast_response(&mut self, unicast: bool) {
+        self.unicast_response = unicast;
     }
 }
 
@@ -112,9 +150,24 @@ impl ByteConvertible for Question {
     fn to_bytes(&self) -> Vec<u8> {
         let mut buffer =
             Vec::with_capacity(self.q_name.byte_size() + size_of::<u16>() + size_of::<u16>());
+
         buffer.extend_from_slice(&self.q_name.to_bytes());
+
         buffer.extend_from_slice(&u16::to_be_bytes(self.q_type as u16));
+
+        #[cfg(not(feature = "mdns"))]
         buffer.extend_from_slice(&u16::to_be_bytes(self.q_class as u16));
+        #[cfg(feature = "mdns")]
+        {
+            let fused_last_byte = if self.unicast_response {
+                const MDNS_UNICAST_RESPONSE: u16 = 1 << 15;
+                self.q_class as u16 | MDNS_UNICAST_RESPONSE
+            } else {
+                self.q_class as u16
+            };
+            buffer.extend_from_slice(&u16::to_be_bytes(fused_last_byte));
+        }
+
         buffer
     }
 }
@@ -126,9 +179,25 @@ impl CompressedByteConvertible for Question {
         offset: usize,
     ) -> Vec<u8> {
         let mut buffer = Vec::new();
+
         buffer.extend_from_slice(&self.q_name.to_bytes_compressed(names, offset));
+
         buffer.extend_from_slice(&u16::to_be_bytes(self.q_type as u16));
+
+        #[cfg(not(feature = "mdns"))]
         buffer.extend_from_slice(&u16::to_be_bytes(self.q_class as u16));
+        #[cfg(feature = "mdns")]
+        {
+            let fused_last_byte = if self.unicast_response {
+                const MDNS_UNICAST_RESPONSE: u16 = 1 << 15;
+                self.q_class as u16 | MDNS_UNICAST_RESPONSE
+            } else {
+                self.q_class as u16
+            };
+
+            buffer.extend_from_slice(&u16::to_be_bytes(fused_last_byte));
+        }
+
         buffer
     }
 }
