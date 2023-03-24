@@ -58,6 +58,15 @@ mod tests {
     }
 
     #[test]
+    fn fqdn_link_local() {
+        let local = FQDN::new("_airplay._tcp.local");
+        let non_local = FQDN::new("google.com");
+
+        assert_eq!(local.is_link_local(), true);
+        assert_eq!(non_local.is_link_local(), false);
+    }
+
+    #[test]
     fn build_query_correct() {
         let mut query = Packet::new();
         query.add_question(Question::new(

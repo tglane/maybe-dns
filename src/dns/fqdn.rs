@@ -48,6 +48,17 @@ impl FQDN {
     pub fn iter(&self) -> std::slice::Iter<Vec<u8>> {
         self.data.iter()
     }
+
+    pub fn is_link_local(&self) -> bool {
+        // Check if the fqdn ends with .local(.)
+        // This indicates a special, local-only top level domain
+        if let Some(tld) = self.data.last() {
+            if let Ok(tld) = std::str::from_utf8(tld.as_slice()) {
+                return tld == "local";
+            }
+        }
+        return false;
+    }
 }
 
 impl ByteConvertible for FQDN {
