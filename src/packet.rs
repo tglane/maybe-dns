@@ -8,7 +8,7 @@ use super::question::{QClass, QType, Question};
 use super::resource::{RecordClass, RecordData, RecordType, ResourceRecord};
 use super::util::{get_name_range, resolve_pointer_in_name};
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Packet {
     header: Header,
     questions: Vec<Question>,
@@ -117,6 +117,10 @@ impl Packet {
         self.header.set_recursion_available(ra);
     }
 
+    pub fn header(&self) -> &Header {
+        &self.header
+    }
+
     pub fn set_header(&mut self, header: Header) {
         self.header = header;
 
@@ -128,6 +132,10 @@ impl Packet {
 
     pub fn questions(&self) -> &[Question] {
         &self.questions
+    }
+
+    pub fn questions_mut(&mut self) -> &mut Vec<Question> {
+        &mut self.questions
     }
 
     pub fn take_questions(&mut self) -> Vec<Question> {

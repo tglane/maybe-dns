@@ -6,7 +6,7 @@ use modular_bitfield::prelude::{bitfield, B1, B3, B4};
 use super::byteconvertible::{ByteConvertible, CompressedByteConvertible};
 use super::error::DnsError;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Header {
     pub(super) id: u16,
 
@@ -186,7 +186,7 @@ impl TryFrom<&[u8; 12]> for Header {
 }
 
 #[bitfield]
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct FlagBitfield {
     /// Recursion desired is set by a client to indicate the client wants the server to recursively
     /// query further server by itself

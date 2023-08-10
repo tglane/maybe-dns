@@ -5,7 +5,7 @@ use super::util::hash_bytes;
 use super::DnsError;
 use super::{COMPRESSION_MASK, COMPRESSION_MASK_U16};
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct FQDN {
     data: Vec<Vec<u8>>,
 }
@@ -107,6 +107,12 @@ impl CompressedByteConvertible for FQDN {
         }
 
         buffer
+    }
+}
+
+impl From<&str> for FQDN {
+    fn from(value: &str) -> Self {
+        Self::new(value)
     }
 }
 

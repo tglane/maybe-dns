@@ -93,7 +93,7 @@ impl TryFrom<u16> for RecordType {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RecordData {
     A(Ipv4Addr),
     NS(FQDN),
@@ -639,7 +639,7 @@ impl CompressedByteConvertible for RecordData {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ResourceRecord {
     pub(super) a_name: FQDN,
     pub(super) a_type: RecordType,

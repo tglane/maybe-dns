@@ -1,17 +1,16 @@
 [package]
-name = "maybe-mdns"
+name = "maybe-dns"
 version = "0.1.0"
 authors = ["Timo Glane <timo.glane<at>gmail.com>"]
 edition = "2021"
-description = "Library to parse and create DNS packets and use MDNS for network discovery"
+description = "Library to parse and create DNS packets with an optional extension for MDNS packets"
 license = "MIT"
 keywords = ["dns", "mdns", "parser"]
 categories = ["network-programming", "parsing", "parser-implementations", "web-programming"]
 
 [features]
-mdns = ["net2"]
+mdns = []
 
 [dependencies]
 modular-bitfield = "0.11.2"
 rand = "0.8.5"
-net2 = { version = "0.2.37", optional = true }

@@ -87,7 +87,7 @@ impl TryFrom<u16> for QType {
         }
     }
 }
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Question {
     pub(super) q_name: FQDN,
     pub(super) q_type: QType,
