@@ -1,10 +1,10 @@
+use modular_bitfield::prelude::{bitfield, B1, B3, B4};
 use std::convert::{TryFrom, TryInto};
 use std::mem::{size_of, transmute};
 
-use modular_bitfield::prelude::{bitfield, B1, B3, B4};
-
-use super::byteconvertible::{ByteConvertible, CompressedByteConvertible};
-use super::error::DnsError;
+use crate::buffer::DnsBuffer;
+use crate::byteconvertible::{ByteConvertible, CompressedByteConvertible};
+use crate::error::DnsError;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Header {
@@ -170,17 +170,17 @@ impl CompressedByteConvertible for Header {
     }
 }
 
-impl TryFrom<&[u8; 12]> for Header {
+impl<'a> TryFrom<&mut DnsBuffer<'a>> for Header {
     type Error = DnsError;
 
-    fn try_from(buffer: &[u8; 12]) -> Result<Self, Self::Error> {
+    fn try_from(buffer: &mut DnsBuffer) -> Result<Self, Self::Error> {
         Ok(Header {
-            id: u16::from_be_bytes(buffer[0..2].try_into()?),
-            flags: FlagBitfield::from_bytes(buffer[2..4].try_into()?),
-            ques_count: u16::from_be_bytes(buffer[4..6].try_into()?),
-            ans_count: u16::from_be_bytes(buffer[6..8].try_into()?),
-            auth_count: u16::from_be_bytes(buffer[8..10].try_into()?),
-            add_count: u16::from_be_bytes(buffer[10..12].try_into()?),
+            id: buffer.extract_u16()?,
+            flags: FlagBitfield::from_bytes(buffer.extract_bytes(2)?.try_into()?),
+            ques_count: buffer.extract_u16()?,
+            ans_count: buffer.extract_u16()?,
+            auth_count: buffer.extract_u16()?,
+            add_count: buffer.extract_u16()?,
         })
     }
 }

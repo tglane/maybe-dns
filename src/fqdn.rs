@@ -1,9 +1,10 @@
 use std::convert::{From, TryFrom};
 
-use super::byteconvertible::{ByteConvertible, CompressedByteConvertible};
-use super::util::hash_bytes;
-use super::DnsError;
-use super::{COMPRESSION_MASK, COMPRESSION_MASK_U16};
+use crate::buffer::DnsBuffer;
+use crate::byteconvertible::{ByteConvertible, CompressedByteConvertible};
+use crate::error::DnsError;
+use crate::util::hash_bytes;
+use crate::COMPRESSION_MASK_U16;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct FQDN {
@@ -126,32 +127,16 @@ impl From<&[&str]> for FQDN {
     }
 }
 
-impl TryFrom<&[u8]> for FQDN {
+impl From<Vec<Vec<u8>>> for FQDN {
+    fn from(data: Vec<Vec<u8>>) -> Self {
+        Self { data }
+    }
+}
+
+impl<'a> TryFrom<&mut DnsBuffer<'a>> for FQDN {
     type Error = DnsError;
 
-    fn try_from(buffer: &[u8]) -> Result<Self, Self::Error> {
-        let mut pos = 0_usize;
-        let mut data = Vec::<Vec<u8>>::new();
-
-        loop {
-            if pos >= 255 || pos >= buffer.len() {
-                return Err(DnsError::LengthViolation);
-            }
-
-            let len = buffer[pos];
-            pos += 1;
-            if len & COMPRESSION_MASK == COMPRESSION_MASK {
-                return Err(DnsError::UnresolveableCompressionPointer);
-            } else if pos + len as usize > buffer.len() {
-                return Err(DnsError::LengthViolation);
-            } else if len == 0 {
-                break;
-            }
-
-            data.push(buffer[pos..pos + len as usize].to_vec());
-            pos += len as usize;
-        }
-
-        Ok(Self { data })
+    fn try_from(buffer: &mut DnsBuffer) -> Result<Self, Self::Error> {
+        buffer.extract_fqdn()
     }
 }

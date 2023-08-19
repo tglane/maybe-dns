@@ -1,9 +1,10 @@
 use std::convert::TryFrom;
 use std::mem::size_of;
 
-use super::byteconvertible::{ByteConvertible, CompressedByteConvertible};
-use super::error::DnsError;
-use super::fqdn::FQDN;
+use crate::buffer::DnsBuffer;
+use crate::byteconvertible::{ByteConvertible, CompressedByteConvertible};
+use crate::error::DnsError;
+use crate::fqdn::FQDN;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum QClass {
@@ -139,6 +140,38 @@ impl Question {
     #[cfg(feature = "mdns")]
     pub fn set_unicast_response(&mut self, unicast: bool) {
         self.unicast_response = unicast;
+    }
+}
+
+impl<'a> TryFrom<&mut DnsBuffer<'a>> for Question {
+    type Error = DnsError;
+
+    fn try_from(buffer: &mut DnsBuffer<'a>) -> Result<Self, Self::Error> {
+        let q_name = buffer.extract_fqdn()?;
+
+        let q_type = buffer.extract_u16_as::<QType>()?;
+
+        #[cfg(not(feature = "mdns"))]
+        let q_class = buffer.extract_u16_as::<QClass>()?;
+        #[cfg(feature = "mdns")]
+        let (q_class, unicast_response) = {
+            const MDNS_UNICAST_RESPONSE: u16 = 1 << 15;
+            let bin_val = u16::from_be_bytes(buffer.extract_bytes(2).try_into()?);
+            if bin_val & MDNS_UNICAST_RESPONSE > 0 {
+                (QClass::try_from(bin_val & !MDNS_UNICAST_RESPONSE)?, true)
+            } else {
+                (QClass::try_from(bin_val)?, false)
+            }
+        };
+        // println!("{:?} - {:?} - {:?}", q_name.to_string(), q_type, q_class);
+
+        Ok(Self {
+            q_name,
+            q_type,
+            q_class,
+            #[cfg(feature = "mdns")]
+            unicast_response,
+        })
     }
 }
 

@@ -1,14 +1,19 @@
+mod buffer;
 mod byteconvertible;
 mod error;
 mod fqdn;
 mod header;
 mod packet;
 mod question;
+mod record_data;
 mod resource;
 mod util;
 
 const COMPRESSION_MASK: u8 = 0b1100_0000;
 const COMPRESSION_MASK_U16: u16 = 0b1100_0000_0000_0000;
+
+/// Simple abstraction over a non-owning binary buffer containing methods to extract DNS data types
+pub use self::buffer::DnsBuffer;
 
 /// Submodule containing a dns packet
 pub use self::packet::Packet;
@@ -17,7 +22,10 @@ pub use self::packet::Packet;
 pub use self::question::{QClass, QType, Question};
 
 /// Submodule containing dns resource record type and enums for its dns class and dns type
-pub use self::resource::{RecordClass, RecordData, RecordType, ResourceRecord};
+pub use self::resource::{RecordClass, RecordType, ResourceRecord};
+
+/// Submodule containing dns record data type used as a payload in a DNS resource
+pub use self::record_data::RecordData;
 
 /// Submodule containing fully qualified domain name (FQDN) type
 pub use self::fqdn::FQDN;
@@ -64,7 +72,8 @@ mod tests {
     #[test]
     fn parse_simple_query_packet() {
         let packet = Packet::try_from(&GOOGLE_QUERY_SAMPLE[..]);
-        assert!(packet.is_ok());
+        println!("{:?}", packet.unwrap());
+        // assert!(packet.is_ok());
     }
 
     #[test]
@@ -107,6 +116,7 @@ mod tests {
         assert!(packet.is_ok());
 
         let packet = packet.unwrap();
+        println!("{:?}", packet);
         assert_eq!(1, packet.questions().len());
         assert_eq!("google.com", packet.questions()[0].q_name.to_string());
         assert_eq!(QType::A, packet.questions()[0].q_type);
