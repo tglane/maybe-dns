@@ -1,4 +1,4 @@
-use std::convert::{TryFrom, TryInto};
+use std::convert::{From, Into, TryFrom, TryInto};
 use std::mem::size_of;
 
 use crate::buffer::DnsBuffer;
@@ -9,23 +9,34 @@ use crate::record_data::RecordData;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum RecordClass {
-    IN = 1,
-    CS = 2,
-    CH = 3,
-    HS = 4,
+    IN,
+    CS,
+    CH,
+    HS,
+    UdpPayloadSize(u16), // RFC 6891 eDNS OPT pseudo record
 }
 
-impl TryFrom<u16> for RecordClass {
-    type Error = DnsError;
-
-    fn try_from(number: u16) -> Result<Self, DnsError> {
+impl From<u16> for RecordClass {
+    fn from(number: u16) -> Self {
         let number = number & 0b01111111_11111111;
         match number {
-            1 => Ok(RecordClass::IN),
-            2 => Ok(RecordClass::CS),
-            3 => Ok(RecordClass::CH),
-            4 => Ok(RecordClass::HS),
-            _ => Err(DnsError::InvalidClass(number)),
+            1 => Self::IN,
+            2 => Self::CS,
+            3 => Self::CH,
+            4 => Self::HS,
+            _ => Self::UdpPayloadSize(number),
+        }
+    }
+}
+
+impl Into<u16> for RecordClass {
+    fn into(self) -> u16 {
+        match self {
+            Self::IN => 1,
+            Self::CS => 2,
+            Self::CH => 3,
+            Self::HS => 4,
+            Self::UdpPayloadSize(size) => size,
         }
     }
 }
@@ -45,26 +56,28 @@ pub enum RecordType {
     TXT = 16,
     AAAA = 28,
     SRV = 33,
+    OPT = 41, // RFC 6891 eDNS OPT pseudo-record
     NSEC = 47,
 }
 
 impl RecordType {
     pub fn compression_allowed(&self) -> bool {
         match self {
-            RecordType::A => false,
-            RecordType::NS => true,
-            RecordType::CNAME => true,
-            RecordType::SOA => true,
-            RecordType::NULL => false,
-            RecordType::WKS => false,
-            RecordType::PTR => true,
-            RecordType::HINFO => false,
-            RecordType::MINFO => true,
-            RecordType::MX => true,
-            RecordType::TXT => true,
-            RecordType::AAAA => false,
-            RecordType::SRV => true,
-            RecordType::NSEC => true,
+            Self::A => false,
+            Self::NS => true,
+            Self::CNAME => true,
+            Self::SOA => true,
+            Self::NULL => false,
+            Self::WKS => false,
+            Self::PTR => true,
+            Self::HINFO => false,
+            Self::MINFO => true,
+            Self::MX => true,
+            Self::TXT => true,
+            Self::AAAA => false,
+            Self::SRV => true,
+            Self::OPT => false,
+            Self::NSEC => true,
         }
     }
 }
@@ -74,20 +87,21 @@ impl TryFrom<u16> for RecordType {
 
     fn try_from(number: u16) -> Result<Self, DnsError> {
         match number {
-            1 => Ok(RecordType::A),
-            2 => Ok(RecordType::NS),
-            5 => Ok(RecordType::CNAME),
-            6 => Ok(RecordType::SOA),
-            10 => Ok(RecordType::NULL),
-            11 => Ok(RecordType::WKS),
-            12 => Ok(RecordType::PTR),
-            13 => Ok(RecordType::HINFO),
-            14 => Ok(RecordType::MINFO),
-            15 => Ok(RecordType::MX),
-            16 => Ok(RecordType::TXT),
-            28 => Ok(RecordType::AAAA),
-            33 => Ok(RecordType::SRV),
-            47 => Ok(RecordType::NSEC),
+            1 => Ok(Self::A),
+            2 => Ok(Self::NS),
+            5 => Ok(Self::CNAME),
+            6 => Ok(Self::SOA),
+            10 => Ok(Self::NULL),
+            11 => Ok(Self::WKS),
+            12 => Ok(Self::PTR),
+            13 => Ok(Self::HINFO),
+            14 => Ok(Self::MINFO),
+            15 => Ok(Self::MX),
+            16 => Ok(Self::TXT),
+            28 => Ok(Self::AAAA),
+            33 => Ok(Self::SRV),
+            41 => Ok(Self::OPT),
+            47 => Ok(Self::NSEC),
             _ => Err(DnsError::InvalidType(number)),
         }
     }
@@ -184,20 +198,19 @@ impl<'a> TryFrom<&mut DnsBuffer<'a>> for ResourceRecord {
     fn try_from(buffer: &mut DnsBuffer<'a>) -> Result<Self, Self::Error> {
         let a_name = buffer.extract_fqdn()?;
 
-        println!("LEL: {:?} - {:?}", a_name, buffer.read_bytes(2)?);
         let a_type = buffer.extract_u16_as::<RecordType>()?;
 
         #[cfg(not(feature = "mdns"))]
-        let a_class = buffer.extract_u16_as::<RecordClass>()?;
+        let a_class = RecordClass::from(buffer.extract_u16()?);
         #[cfg(feature = "mdns")]
         let (a_class, cache_flush) = {
             const MDNS_ENABLE_CACHE_FLUSH: u16 = 1 << 15;
             let bin_val = buffer.extract_u16()?;
             if bin_val & MDNS_ENABLE_CACHE_FLUSH > 0 {
                 let class_val = bin_val & !MDNS_ENABLE_CACHE_FLUSH;
-                (RecordClass::try_from(class_val)?, true)
+                (RecordClass::from(class_val), true)
             } else {
-                (RecordClass::try_from(bin_val)?, false)
+                (RecordClass::from(bin_val), false)
             }
         };
 
@@ -238,14 +251,14 @@ impl ByteConvertible for ResourceRecord {
         buffer.extend_from_slice(&u16::to_be_bytes(self.a_type as u16));
 
         #[cfg(not(feature = "mdns"))]
-        buffer.extend_from_slice(&u16::to_be_bytes(self.a_class as u16));
+        buffer.extend_from_slice(&u16::to_be_bytes(self.a_class.into()));
         #[cfg(feature = "mdns")]
         {
             let fused_last_byte = if self.cache_flush {
                 const MDNS_ENABLE_CACHE_FLUSH: u16 = 1 << 15;
-                self.a_class as u16 | MDNS_ENABLE_CACHE_FLUSH
+                Into::<u16>::into(self.a_class) | MDNS_ENABLE_CACHE_FLUSH
             } else {
-                self.a_class as u16
+                Into::<u16>::into(self.a_class)
             };
             buffer.extend_from_slice(&u16::to_be_bytes(fused_last_byte));
         }
@@ -273,14 +286,14 @@ impl CompressedByteConvertible for ResourceRecord {
         buffer.extend_from_slice(&u16::to_be_bytes(self.a_type as u16));
 
         #[cfg(not(feature = "mdns"))]
-        buffer.extend_from_slice(&u16::to_be_bytes(self.a_class as u16));
+        buffer.extend_from_slice(&u16::to_be_bytes(self.a_class.into()));
         #[cfg(feature = "mdns")]
         {
-            let fused_last_byte = if self.cache_flush {
+            let fused_last_byte: u16 = if self.cache_flush {
                 const MDNS_UNICAST_RESPONSE: u16 = 1 << 15;
-                self.a_class as u16 | MDNS_UNICAST_RESPONSE
+                Into::<u16>::into(self.a_class) | MDNS_UNICAST_RESPONSE
             } else {
-                self.a_class as u16
+                Into::<u16>::into(self.a_class)
             };
             buffer.extend_from_slice(&u16::to_be_bytes(fused_last_byte));
         }

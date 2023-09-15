@@ -66,24 +66,24 @@ impl TryFrom<u16> for QType {
 
     fn try_from(number: u16) -> Result<Self, DnsError> {
         match number {
-            1 => Ok(QType::A),
-            2 => Ok(QType::NS),
-            5 => Ok(QType::CNAME),
-            6 => Ok(QType::SOA),
-            10 => Ok(QType::NULL),
-            11 => Ok(QType::WKS),
-            12 => Ok(QType::PTR),
-            13 => Ok(QType::HINFO),
-            14 => Ok(QType::MINFO),
-            15 => Ok(QType::MX),
-            16 => Ok(QType::TXT),
-            28 => Ok(QType::AAAA),
-            33 => Ok(QType::SRV),
-            47 => Ok(QType::NSEC),
-            252 => Ok(QType::AXFR),
-            253 => Ok(QType::MAILB),
-            254 => Ok(QType::MAILA),
-            255 => Ok(QType::ANY),
+            1 => Ok(Self::A),
+            2 => Ok(Self::NS),
+            5 => Ok(Self::CNAME),
+            6 => Ok(Self::SOA),
+            10 => Ok(Self::NULL),
+            11 => Ok(Self::WKS),
+            12 => Ok(Self::PTR),
+            13 => Ok(Self::HINFO),
+            14 => Ok(Self::MINFO),
+            15 => Ok(Self::MX),
+            16 => Ok(Self::TXT),
+            28 => Ok(Self::AAAA),
+            33 => Ok(Self::SRV),
+            47 => Ok(Self::NSEC),
+            252 => Ok(Self::AXFR),
+            253 => Ok(Self::MAILB),
+            254 => Ok(Self::MAILA),
+            255 => Ok(Self::ANY),
             _ => Err(DnsError::InvalidType(number)),
         }
     }
@@ -156,14 +156,13 @@ impl<'a> TryFrom<&mut DnsBuffer<'a>> for Question {
         #[cfg(feature = "mdns")]
         let (q_class, unicast_response) = {
             const MDNS_UNICAST_RESPONSE: u16 = 1 << 15;
-            let bin_val = u16::from_be_bytes(buffer.extract_bytes(2).try_into()?);
+            let bin_val = buffer.extract_u16()?;
             if bin_val & MDNS_UNICAST_RESPONSE > 0 {
                 (QClass::try_from(bin_val & !MDNS_UNICAST_RESPONSE)?, true)
             } else {
                 (QClass::try_from(bin_val)?, false)
             }
         };
-        // println!("{:?} - {:?} - {:?}", q_name.to_string(), q_type, q_class);
 
         Ok(Self {
             q_name,

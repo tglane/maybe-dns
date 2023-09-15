@@ -1,4 +1,5 @@
 use std::convert::{From, TryFrom, TryInto};
+use std::collections::HashMap;
 use std::net::{Ipv4Addr, Ipv6Addr};
 
 use crate::buffer::DnsBuffer;
@@ -48,6 +49,7 @@ pub enum RecordData {
         port: u16,
         target: FQDN,
     },
+    OPT(HashMap<u16, Vec<u8>>),
     NSEC {
         next_domain_name: FQDN,
         type_mask: Vec<u8>,
@@ -126,6 +128,17 @@ impl RecordData {
                     target,
                 }
             }
+            RecordType::OPT => {
+                let mut kv_data = HashMap::new();
+                while buffer.remaining() > 0 {
+                    let opt_code = buffer.extract_u16()?;
+                    let opt_data_len = buffer.extract_u16()?;
+                    let opt_data = buffer.extract_bytes(opt_data_len as usize)?;
+
+                    kv_data.insert(opt_code, opt_data.to_vec());
+                }
+                RecordData::OPT(kv_data)
+            }
             RecordType::NSEC => {
                 let next_domain_name = buffer.extract_fqdn()?;
                 let type_mask = buffer.read_bytes(buffer.remaining())?.to_vec();
@@ -177,6 +190,7 @@ impl ByteConvertible for RecordData {
                 port: _,
                 ref target,
             } => 2 + 2 + 2 + target.len() + 2,
+            RecordData::OPT(kv_data) => 2 + 2 + kv_data.iter().fold(0, |acc, elem| acc + elem.1.len()),
             RecordData::NSEC {
                 ref next_domain_name,
                 ref type_mask,
@@ -265,6 +279,15 @@ impl ByteConvertible for RecordData {
                 buff.extend_from_slice(&u16::to_be_bytes(*weight));
                 buff.extend_from_slice(&u16::to_be_bytes(*port));
                 buff.extend_from_slice(&target.to_bytes());
+                buff
+            }
+            RecordData::OPT(kv_data) => {
+                let mut buff = Vec::with_capacity(0);
+                for (code, data) in kv_data.iter() {
+                    buff.extend_from_slice(&u16::to_be_bytes(*code));
+                    buff.extend_from_slice(&u16::to_be_bytes(data.len() as u16));
+                    buff.extend_from_slice(&data);
+                }
                 buff
             }
             RecordData::NSEC {
@@ -368,6 +391,15 @@ impl CompressedByteConvertible for RecordData {
                 buff.extend_from_slice(&u16::to_be_bytes(*weight));
                 buff.extend_from_slice(&u16::to_be_bytes(*port));
                 buff.extend_from_slice(&target.to_bytes_compressed(names, outer_off + 6));
+                buff
+            }
+            RecordData::OPT(kv_data) => {
+                let mut buff = Vec::with_capacity(0);
+                for (code, data) in kv_data.iter() {
+                    buff.extend_from_slice(&u16::to_be_bytes(*code));
+                    buff.extend_from_slice(&u16::to_be_bytes(data.len() as u16));
+                    buff.extend_from_slice(&data);
+                }
                 buff
             }
             RecordData::NSEC {

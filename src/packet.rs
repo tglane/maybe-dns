@@ -314,27 +314,34 @@ impl<'a> TryFrom<&mut DnsBuffer<'a>> for Packet {
         println!("H: {:?}", packet.header());
 
         // Parse questions from buffer
+        let mut questions = Vec::with_capacity(packet.header.ques_count as usize);
         for _ in 0..packet.header.ques_count {
-            packet.add_question(Question::try_from(buffer as &mut _)?);
+            questions.push(Question::try_from(buffer as &mut _)?);
         }
+        packet.questions = questions;
 
         // Parse answer records from buffer
+        let mut answers = Vec::with_capacity(packet.header.ans_count as usize);
         for _ in 0..packet.header.ans_count {
             // packet.add_answer(ResourceRecord::try_from(buffer as &mut _)?);
-            let r = ResourceRecord::try_from(buffer as &mut _)?;
-            println!("R: {:?}", r);
-            packet.add_answer(r);
+            answers.push(ResourceRecord::try_from(buffer as &mut _)?);
         }
+        packet.answers = answers;
 
         // Parse authority records from buffer
+        let mut authorities = Vec::with_capacity(packet.header.auth_count as usize);
         for _ in 0..packet.header.auth_count {
-            packet.add_authority(ResourceRecord::try_from(buffer as &mut _)?);
+            authorities.push(ResourceRecord::try_from(buffer as &mut _)?);
         }
+        packet.authorities = authorities;
 
         // Parse additional records from buffer
+        let mut additionals = Vec::with_capacity(packet.header.add_count as usize);
         for _ in 0..packet.header.add_count {
-            packet.add_additional(ResourceRecord::try_from(buffer as &mut _)?);
+            additionals.push(ResourceRecord::try_from(buffer as &mut _)?);
         }
+        packet.additional = additionals;
+
         Ok(packet)
     }
 }
