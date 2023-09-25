@@ -3,11 +3,12 @@ use std::convert::{From, TryFrom};
 use crate::buffer::DnsBuffer;
 use crate::byteconvertible::{ByteConvertible, CompressedByteConvertible};
 use crate::error::DnsError;
-use crate::util::hash_bytes;
+use crate::util::hash_fqdn;
 use crate::COMPRESSION_MASK_U16;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct FQDN {
+    // TODO: Store data in a flattend representation (Vec<u8> instead of Vec<Vec<u8>>)
     data: Vec<Vec<u8>>,
 }
 
@@ -27,8 +28,11 @@ impl FQDN {
     }
 
     pub fn to_string(&self) -> String {
-        let mut name = String::new();
+        if self.is_root() {
+            return String::from(".");
+        }
 
+        let mut name = String::with_capacity(self.len());
         for (idx, name_part) in self.iter().enumerate() {
             // Safe because the u8 in self.data are parsed from a &str in the constructor
             name.push_str(unsafe { std::str::from_utf8_unchecked(name_part) });
@@ -50,6 +54,10 @@ impl FQDN {
         self.data.iter()
     }
 
+    pub fn iter_mut(&mut self) -> std::slice::IterMut<Vec<u8>> {
+        self.data.iter_mut()
+    }
+
     pub fn is_link_local(&self) -> bool {
         // Check if the fqdn ends with .local(.)
         // This indicates a special, local-only top level domain
@@ -59,6 +67,42 @@ impl FQDN {
             }
         }
         return false;
+    }
+
+    pub fn is_root(&self) -> bool {
+        // Root simply means an empty fqdn
+        self.data.len() == 0
+    }
+
+    pub fn append_label(&mut self, name: &str) {
+        self.data.push(name.as_bytes().to_vec());
+    }
+}
+
+impl IntoIterator for FQDN {
+    type Item = Vec<u8>;
+    type IntoIter = std::vec::IntoIter<Self::Item>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.data.into_iter()
+    }
+}
+
+impl<'a> IntoIterator for &'a FQDN {
+    type Item = &'a Vec<u8>;
+    type IntoIter = std::slice::Iter<'a, Vec<u8>>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
+impl<'a> IntoIterator for &'a mut FQDN {
+    type Item = &'a mut Vec<u8>;
+    type IntoIter = std::slice::IterMut<'a, Vec<u8>>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter_mut()
     }
 }
 
@@ -74,38 +118,6 @@ impl ByteConvertible for FQDN {
             buffer.extend_from_slice(&name_part);
         }
         buffer.push(0);
-        buffer
-    }
-}
-
-impl CompressedByteConvertible for FQDN {
-    fn to_bytes_compressed(
-        &self,
-        names: &mut std::collections::HashMap<u64, usize>,
-        mut offset: usize,
-    ) -> Vec<u8> {
-        let mut buffer = Vec::new();
-        let flattend = self.to_bytes();
-
-        let mut start_idx = 0;
-        while start_idx < flattend.len() {
-            let end_idx = start_idx + flattend[start_idx] as usize;
-            let name_part = &flattend[start_idx..=end_idx];
-            let remaining_hash = hash_bytes(&flattend[start_idx..]);
-
-            if let Some(compressed_offset) = names.get(&remaining_hash) {
-                let compressed_name =
-                    (*compressed_offset as u16 | COMPRESSION_MASK_U16).to_be_bytes();
-                buffer.extend_from_slice(&compressed_name);
-                return buffer;
-            } else {
-                buffer.extend_from_slice(&name_part);
-                names.insert(remaining_hash, offset);
-                offset += name_part.len();
-            }
-
-            start_idx += flattend[start_idx] as usize + 1;
-        }
 
         buffer
     }
@@ -133,10 +145,61 @@ impl From<Vec<Vec<u8>>> for FQDN {
     }
 }
 
+impl From<&[Vec<u8>]> for FQDN {
+    fn from(data: &[Vec<u8>]) -> Self {
+        Self { data: data.to_vec() }
+    }
+}
+
 impl<'a> TryFrom<&mut DnsBuffer<'a>> for FQDN {
     type Error = DnsError;
 
     fn try_from(buffer: &mut DnsBuffer) -> Result<Self, Self::Error> {
         buffer.extract_fqdn()
+    }
+}
+
+impl CompressedByteConvertible for FQDN {
+    fn to_bytes_compressed(
+        &self,
+        names: &mut std::collections::HashMap<u64, usize>,
+        mut offset: usize,
+    ) -> Vec<u8> {
+        let mut buffer = Vec::new();
+
+        for i in 0..self.data.len() {
+            let remaining_fqdn = &self.data[i..];
+            let remaining_hash = hash_fqdn(remaining_fqdn);
+
+            if let Some(pointer) = names.get(&remaining_hash) {
+                let compressed_name = (*pointer as u16 | COMPRESSION_MASK_U16).to_be_bytes();
+                buffer.extend_from_slice(&compressed_name);
+                return buffer;
+            } else {
+                buffer.push(self.data[i].len() as u8);
+                buffer.extend_from_slice(&self.data[i]);
+
+                names.insert(remaining_hash, offset);
+                offset += self.data[i].len() + 1;
+            }
+        }
+
+        buffer.push(0);
+
+        buffer
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::FQDN;
+
+    #[test]
+    fn fqdn_link_local() {
+        let local = FQDN::new("_airplay._tcp.local");
+        let non_local = FQDN::new("google.com");
+
+        assert_eq!(local.is_link_local(), true);
+        assert_eq!(non_local.is_link_local(), false);
     }
 }

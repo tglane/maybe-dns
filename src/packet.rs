@@ -311,7 +311,6 @@ impl<'a> TryFrom<&mut DnsBuffer<'a>> for Packet {
         let mut packet = Packet::new();
 
         packet.set_header(Header::try_from(buffer as &mut _)?);
-        println!("H: {:?}", packet.header());
 
         // Parse questions from buffer
         let mut questions = Vec::with_capacity(packet.header.ques_count as usize);
