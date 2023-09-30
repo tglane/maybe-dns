@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::convert::From;
 
 use crate::error::DnsError;
@@ -10,6 +11,7 @@ use crate::fqdn::FQDN;
 pub struct DnsBuffer<'a> {
     data: &'a [u8],
     pos: usize,
+    // d: Cow<'a, [u8]>,
 }
 
 impl<'a> DnsBuffer<'a> {
@@ -65,6 +67,13 @@ impl<'a> DnsBuffer<'a> {
         TwoBytesType: TryFrom<u16, Error = DnsError>,
     {
         Ok(TwoBytesType::try_from(self.extract_u16()?)?)
+    }
+
+    pub fn extract_character_string(&mut self) -> Result<Vec<u8>, DnsError> {
+        let len = self.extract_u8()? as usize;
+        let mut data = Vec::with_capacity(len);
+        data.extend_from_slice(self.extract_bytes(len)?);
+        Ok(data)
     }
 
     pub fn extract_fqdn(&mut self) -> Result<FQDN, DnsError> {

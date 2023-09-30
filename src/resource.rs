@@ -43,21 +43,33 @@ impl Into<u16> for RecordClass {
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum RecordType {
-    A = 1,
-    NS = 2,
-    CNAME = 5,
-    SOA = 6,
-    NULL = 10,
-    WKS = 11,
-    PTR = 12,
-    HINFO = 13,
-    MINFO = 14,
-    MX = 15,
-    TXT = 16,
-    AAAA = 28,
-    SRV = 33,
-    OPT = 41, // RFC 6891 eDNS OPT pseudo-record
-    NSEC = 47,
+    A = 1,           // RFC 1035
+    NS = 2,          // RFC 1035
+    CNAME = 5,       // RFC 1035
+    SOA = 6,         // RFC 1035
+    NULL = 10,       // RFC 1035
+    WKS = 11,        // RFC 1035
+    PTR = 12,        // RFC 1035
+    HINFO = 13,      // RFC 1035
+    MINFO = 14,      // RFC 1035
+    MX = 15,         // RFC 1035
+    TXT = 16,        // RFC 1035
+    AAAA = 28,       // RFC 3596
+    LOC = 29,        // RFC 1876
+    SRV = 33,        // RFC 2782
+    NAPTR = 35,      // RFC 3404
+    OPT = 41,        // RFC 6891
+    DS = 43,         // RFC 4034 TODO
+    SSHFP = 44,      // RFC 4255
+    RRSIG = 46,      // RFC 4034 TODO
+    NSEC = 47,       // RFC 4034
+    DNSKEY = 48,     // RFC 4034
+    TLSA = 52,       // RFC 6698
+    OPENPGPKEY = 61, // RFC 7929
+    EUI48 = 108,     // RFC 7043
+    EUI64 = 109,     // RFC 7043
+    URI = 256,       // RFC 7553
+    CAA = 257,       // RFC 8659
 }
 
 impl RecordType {
@@ -75,9 +87,21 @@ impl RecordType {
             Self::MX => true,
             Self::TXT => true,
             Self::AAAA => false,
+            Self::LOC => false,
             Self::SRV => true,
+            Self::NAPTR => true,
             Self::OPT => false,
+            Self::DS => false, // TODO
+            Self::SSHFP => false,
+            Self::RRSIG => false, // TODO
             Self::NSEC => true,
+            Self::DNSKEY => false,
+            Self::TLSA => false,
+            Self::OPENPGPKEY => false,
+            Self::EUI48 => false,
+            Self::EUI64 => false,
+            Self::URI => false,
+            Self::CAA => false,
         }
     }
 }
@@ -99,9 +123,18 @@ impl TryFrom<u16> for RecordType {
             15 => Ok(Self::MX),
             16 => Ok(Self::TXT),
             28 => Ok(Self::AAAA),
+            29 => Ok(Self::LOC),
             33 => Ok(Self::SRV),
+            35 => Ok(Self::NAPTR),
             41 => Ok(Self::OPT),
+            44 => Ok(Self::SSHFP),
             47 => Ok(Self::NSEC),
+            52 => Ok(Self::TLSA),
+            61 => Ok(Self::OPENPGPKEY),
+            108 => Ok(Self::EUI48),
+            109 => Ok(Self::EUI64),
+            256 => Ok(Self::URI),
+            257 => Ok(Self::CAA),
             _ => Err(DnsError::InvalidType(number)),
         }
     }

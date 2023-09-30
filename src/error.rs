@@ -6,6 +6,11 @@ pub enum DnsError {
     InvalidPacketData,
     LengthViolation,
     UnresolveableCompressionPointer,
+    InvalidSSHFPAlgorithm(u8),
+    InvalidSSHFPFingerprintType(u8),
+    InvalidTLSASelector(u8),
+    InvalidTLSAMatchingType(u8),
+    InvalidDNSKEYAlgorithm(u8),
 }
 
 impl std::error::Error for DnsError {
