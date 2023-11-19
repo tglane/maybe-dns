@@ -21,9 +21,9 @@ impl Packet {
         Self::default()
     }
 
-    pub fn new_query(id: u16, rc: bool) -> Self {
+    pub fn new_query(id: u16, recursion_desired: bool) -> Self {
         Packet {
-            header: Header::new_query(id, rc),
+            header: Header::new_query(id, recursion_desired),
             questions: Vec::new(),
             answers: Vec::new(),
             authorities: Vec::new(),

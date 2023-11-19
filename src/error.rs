@@ -1,3 +1,5 @@
+use std::time::SystemTimeError;
+
 #[derive(Debug)]
 pub enum DnsError {
     InvalidClass(u16),
@@ -10,7 +12,11 @@ pub enum DnsError {
     InvalidSSHFPFingerprintType(u8),
     InvalidTLSASelector(u8),
     InvalidTLSAMatchingType(u8),
-    InvalidDNSKEYAlgorithm(u8),
+    InvalidDnsSecAlgorithm(u8),
+    InvalidDnsSecDigestType(u8),
+    InvalidDnsSecSignatureTimespan(SystemTimeError),
+    DnsSecVerificationError(String),
+    DnsSecSigningError(String),
 }
 
 impl std::error::Error for DnsError {

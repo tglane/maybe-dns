@@ -5,9 +5,9 @@ use crate::buffer::DnsBuffer;
 use crate::byteconvertible::{ByteConvertible, CompressedByteConvertible};
 use crate::error::DnsError;
 use crate::fqdn::FQDN;
-use crate::record_data::RecordData;
+use crate::rdata::RecordData;
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum RecordClass {
     IN,
     CS,
@@ -29,19 +29,29 @@ impl From<u16> for RecordClass {
     }
 }
 
-impl Into<u16> for RecordClass {
-    fn into(self) -> u16 {
-        match self {
-            Self::IN => 1,
-            Self::CS => 2,
-            Self::CH => 3,
-            Self::HS => 4,
-            Self::UdpPayloadSize(size) => size,
+impl From<RecordClass> for u16 {
+    fn from(class: RecordClass) -> u16 {
+        match class {
+            RecordClass::IN => 1,
+            RecordClass::CS => 2,
+            RecordClass::CH => 3,
+            RecordClass::HS => 4,
+            RecordClass::UdpPayloadSize(size) => size,
         }
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+impl ByteConvertible for RecordClass {
+    fn byte_size(&self) -> usize {
+        std::mem::size_of::<u16>()
+    }
+
+    fn to_bytes(&self) -> Vec<u8> {
+        u16::to_be_bytes(u16::from(*self)).to_vec()
+    }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum RecordType {
     A = 1,           // RFC 1035
     NS = 2,          // RFC 1035
@@ -59,9 +69,9 @@ pub enum RecordType {
     SRV = 33,        // RFC 2782
     NAPTR = 35,      // RFC 3404
     OPT = 41,        // RFC 6891
-    DS = 43,         // RFC 4034 TODO
+    DS = 43,         // RFC 4034
     SSHFP = 44,      // RFC 4255
-    RRSIG = 46,      // RFC 4034 TODO
+    RRSIG = 46,      // RFC 4034
     NSEC = 47,       // RFC 4034
     DNSKEY = 48,     // RFC 4034
     TLSA = 52,       // RFC 6698
@@ -91,9 +101,9 @@ impl RecordType {
             Self::SRV => true,
             Self::NAPTR => true,
             Self::OPT => false,
-            Self::DS => false, // TODO
+            Self::DS => false,
             Self::SSHFP => false,
-            Self::RRSIG => false, // TODO
+            Self::RRSIG => false,
             Self::NSEC => true,
             Self::DNSKEY => false,
             Self::TLSA => false,
@@ -127,8 +137,11 @@ impl TryFrom<u16> for RecordType {
             33 => Ok(Self::SRV),
             35 => Ok(Self::NAPTR),
             41 => Ok(Self::OPT),
+            43 => Ok(Self::DS),
             44 => Ok(Self::SSHFP),
+            46 => Ok(Self::RRSIG),
             47 => Ok(Self::NSEC),
+            48 => Ok(Self::DNSKEY),
             52 => Ok(Self::TLSA),
             61 => Ok(Self::OPENPGPKEY),
             108 => Ok(Self::EUI48),
@@ -137,6 +150,50 @@ impl TryFrom<u16> for RecordType {
             257 => Ok(Self::CAA),
             _ => Err(DnsError::InvalidType(number)),
         }
+    }
+}
+
+impl From<RecordType> for u16 {
+    fn from(record_type: RecordType) -> Self {
+        match record_type {
+            RecordType::A => 1,
+            RecordType::NS => 2,
+            RecordType::CNAME => 5,
+            RecordType::SOA => 6,
+            RecordType::NULL => 10,
+            RecordType::WKS => 11,
+            RecordType::PTR => 12,
+            RecordType::HINFO => 13,
+            RecordType::MINFO => 14,
+            RecordType::MX => 15,
+            RecordType::TXT => 16,
+            RecordType::AAAA => 28,
+            RecordType::LOC => 29,
+            RecordType::SRV => 33,
+            RecordType::NAPTR => 35,
+            RecordType::OPT => 41,
+            RecordType::DS => 43,
+            RecordType::SSHFP => 44,
+            RecordType::RRSIG => 46,
+            RecordType::NSEC => 47,
+            RecordType::DNSKEY => 48,
+            RecordType::TLSA => 52,
+            RecordType::OPENPGPKEY => 61,
+            RecordType::EUI48 => 108,
+            RecordType::EUI64 => 109,
+            RecordType::URI => 256,
+            RecordType::CAA => 257,
+        }
+    }
+}
+
+impl ByteConvertible for RecordType {
+    fn byte_size(&self) -> usize {
+        std::mem::size_of::<u16>()
+    }
+
+    fn to_bytes(&self) -> Vec<u8> {
+        u16::to_be_bytes(u16::from(*self)).to_vec()
     }
 }
 

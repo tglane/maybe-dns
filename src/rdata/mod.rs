@@ -1,3 +1,7 @@
+mod dnssec;
+
+pub use self::dnssec::{DNSKEY, DS, NSEC, RRSIG};
+
 use std::collections::HashMap;
 use std::convert::{From, TryFrom, TryInto};
 use std::net::{Ipv4Addr, Ipv6Addr};
@@ -8,6 +12,7 @@ use crate::error::DnsError;
 use crate::fqdn::FQDN;
 use crate::resource::RecordType;
 
+// #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RecordData {
     A(Ipv4Addr),
@@ -67,22 +72,15 @@ pub enum RecordData {
         replacement: FQDN,
     },
     OPT(HashMap<u16, Vec<u8>>),
+    DS(DS),
     SSHFP {
         algorithm: SSHFPAlgorithm,
         fingerprint_type: SSHFPFingerprintType,
         fingerprint: Vec<u8>,
     },
-    NSEC {
-        next_domain_name: FQDN,
-        type_mask: Vec<u8>,
-    },
-    DNSKKEY {
-        zone_key: bool,
-        secure_entry_point: bool,
-        protocol: u8,
-        algorithm: DNSKEYAlgorithm,
-        public_key: Vec<u8>,
-    },
+    RRSIG(RRSIG),
+    NSEC(NSEC),
+    DNSKKEY(DNSKEY),
     TLSA {
         cert_usage: u8,
         selector: TLSASelector,
@@ -201,29 +199,15 @@ impl RecordData {
                 }
                 Self::OPT(kv_data)
             }
+            RecordType::DS => Self::DS(DS::try_from(buffer)?),
             RecordType::SSHFP => Self::SSHFP {
                 algorithm: buffer.extract_u8()?.try_into()?,
                 fingerprint_type: buffer.extract_u8()?.try_into()?,
                 fingerprint: buffer.extract_bytes(buffer.remaining())?.to_vec(),
             },
-            RecordType::NSEC => Self::NSEC {
-                next_domain_name: buffer.extract_fqdn()?,
-                type_mask: buffer.extract_bytes(buffer.remaining())?.to_vec(),
-            },
-            RecordType::DNSKEY => {
-                let flags = buffer.extract_u16()?;
-                let protocol = buffer.extract_u8()?;
-                let algorithm: DNSKEYAlgorithm = buffer.extract_u8()?.try_into()?;
-                let public_key = buffer.extract_bytes(buffer.remaining())?.to_vec();
-
-                Self::DNSKKEY {
-                    zone_key: (flags & 0b00000001_00000000) != 0,
-                    secure_entry_point: (flags & 0b00000000_00000001) != 0,
-                    protocol,
-                    algorithm,
-                    public_key,
-                }
-            }
+            RecordType::RRSIG => Self::RRSIG(RRSIG::try_from(buffer)?),
+            RecordType::NSEC => Self::NSEC(NSEC::try_from(buffer)?),
+            RecordType::DNSKEY => Self::DNSKKEY(DNSKEY::try_from(buffer)?),
             RecordType::TLSA => Self::TLSA {
                 cert_usage: buffer.extract_u8()?,
                 selector: buffer.extract_u8()?.try_into()?,
@@ -321,22 +305,15 @@ impl ByteConvertible for RecordData {
                 2 + 2 + flags.len() + 1 + services.len() + 1 + regexp.len() + 1 + replacement.len()
             }
             Self::OPT(kv_data) => 2 + 2 + kv_data.iter().fold(0, |acc, elem| acc + elem.1.len()),
+            Self::DS(ds) => ds.byte_size(),
             Self::SSHFP {
                 algorithm: _,
                 fingerprint_type: _,
                 ref fingerprint,
             } => 1 + 1 + fingerprint.len(),
-            Self::NSEC {
-                ref next_domain_name,
-                ref type_mask,
-            } => next_domain_name.byte_size() + type_mask.len(),
-            Self::DNSKKEY {
-                zone_key: _,
-                secure_entry_point: _,
-                protocol: _,
-                algorithm: _,
-                ref public_key,
-            } => 4 + public_key.len(),
+            Self::RRSIG(rrsig) => rrsig.byte_size(),
+            Self::NSEC(nsec) => nsec.byte_size(),
+            Self::DNSKKEY(dnskey) => dnskey.byte_size(),
             Self::TLSA {
                 cert_usage: _,
                 selector: _,
@@ -490,6 +467,7 @@ impl ByteConvertible for RecordData {
                 }
                 buff
             }
+            Self::DS(ds) => ds.to_bytes(),
             Self::SSHFP {
                 algorithm,
                 fingerprint_type,
@@ -501,29 +479,9 @@ impl ByteConvertible for RecordData {
                 buff.extend_from_slice(fingerprint);
                 buff
             }
-            Self::NSEC {
-                ref next_domain_name,
-                ref type_mask,
-            } => {
-                let mut buff = next_domain_name.to_bytes();
-                buff.extend_from_slice(&type_mask);
-                buff
-            }
-            Self::DNSKKEY {
-                zone_key,
-                secure_entry_point,
-                protocol,
-                algorithm,
-                ref public_key,
-            } => {
-                let mut buff = Vec::with_capacity(4 + public_key.len());
-                let combined_flags = ((*zone_key as u16) << 8) | *secure_entry_point as u16;
-                buff.extend_from_slice(&u16::to_be_bytes(combined_flags));
-                buff.push(*protocol);
-                buff.push((*algorithm).into());
-                buff.extend_from_slice(public_key);
-                buff
-            }
+            Self::RRSIG(rrsig) => rrsig.to_bytes(),
+            Self::NSEC(nsec) => nsec.to_bytes(),
+            Self::DNSKKEY(dnskey) => dnskey.to_bytes(),
             Self::TLSA {
                 cert_usage,
                 selector,
@@ -708,6 +666,7 @@ impl CompressedByteConvertible for RecordData {
                 }
                 buff
             }
+            Self::DS(ds) => ds.to_bytes(),
             Self::SSHFP {
                 algorithm,
                 fingerprint_type,
@@ -719,29 +678,9 @@ impl CompressedByteConvertible for RecordData {
                 buff.extend_from_slice(fingerprint);
                 buff
             }
-            Self::NSEC {
-                ref next_domain_name,
-                ref type_mask,
-            } => {
-                let mut buff = next_domain_name.to_bytes_compressed(names, outer_off);
-                buff.extend_from_slice(&type_mask);
-                buff
-            }
-            Self::DNSKKEY {
-                zone_key,
-                secure_entry_point,
-                protocol,
-                algorithm,
-                ref public_key,
-            } => {
-                let mut buff = Vec::with_capacity(4 + public_key.len());
-                let combined_flags = ((*zone_key as u16) << 8) | *secure_entry_point as u16;
-                buff.extend_from_slice(&u16::to_be_bytes(combined_flags));
-                buff.push(*protocol);
-                buff.push((*algorithm).into());
-                buff.extend_from_slice(public_key);
-                buff
-            }
+            Self::RRSIG(rrsig) => rrsig.to_bytes(),
+            Self::NSEC(nsec) => nsec.to_bytes_compressed(names, outer_off),
+            Self::DNSKKEY(dnskey) => dnskey.to_bytes(),
             Self::TLSA {
                 cert_usage,
                 selector,
@@ -805,12 +744,12 @@ impl TryFrom<u8> for SSHFPAlgorithm {
     }
 }
 
-impl Into<u8> for SSHFPAlgorithm {
-    fn into(self) -> u8 {
-        match self {
-            Self::Reserved => 0,
-            Self::RSA => 1,
-            Self::DSS => 2,
+impl From<SSHFPAlgorithm> for u8 {
+    fn from(algorithm: SSHFPAlgorithm) -> Self {
+        match algorithm {
+            SSHFPAlgorithm::Reserved => 0,
+            SSHFPAlgorithm::RSA => 1,
+            SSHFPAlgorithm::DSS => 2,
         }
     }
 }
@@ -833,11 +772,11 @@ impl TryFrom<u8> for SSHFPFingerprintType {
     }
 }
 
-impl Into<u8> for SSHFPFingerprintType {
-    fn into(self) -> u8 {
-        match self {
-            Self::Reserved => 0,
-            Self::SHA1 => 1,
+impl From<SSHFPFingerprintType> for u8 {
+    fn from(fingerprint_type: SSHFPFingerprintType) -> Self {
+        match fingerprint_type {
+            SSHFPFingerprintType::Reserved => 0,
+            SSHFPFingerprintType::SHA1 => 1,
         }
     }
 }
@@ -860,11 +799,11 @@ impl TryFrom<u8> for TLSASelector {
     }
 }
 
-impl Into<u8> for TLSASelector {
-    fn into(self) -> u8 {
-        match self {
-            Self::Full => 0,
-            Self::SubjectPublicKeyInfo => 1,
+impl From<TLSASelector> for u8 {
+    fn from(selector: TLSASelector) -> Self {
+        match selector {
+            TLSASelector::Full => 0,
+            TLSASelector::SubjectPublicKeyInfo => 1,
         }
     }
 }
@@ -889,60 +828,12 @@ impl TryFrom<u8> for TLSAMatchingType {
     }
 }
 
-impl Into<u8> for TLSAMatchingType {
-    fn into(self) -> u8 {
-        match self {
-            Self::ExactMatch => 0,
-            Self::SHA256 => 1,
-            Self::SHA512 => 2,
-        }
-    }
-}
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub enum DNSKEYAlgorithm {
-    Reserved = 0,
-    RSAMD5 = 1,
-    DiffieHellman = 2,
-    DSA = 3,
-    ECC = 4,
-    RSASHA1 = 5,
-    Indirect = 252,
-    PrivateDns = 253,
-    PrivateOid = 254,
-}
-
-impl TryFrom<u8> for DNSKEYAlgorithm {
-    type Error = DnsError;
-
-    fn try_from(value: u8) -> Result<Self, Self::Error> {
-        match value {
-            0 => Ok(Self::Reserved),
-            1 => Ok(Self::RSAMD5),
-            2 => Ok(Self::DiffieHellman),
-            3 => Ok(Self::DSA),
-            4 => Ok(Self::ECC),
-            5 => Ok(Self::RSASHA1),
-            252 => Ok(Self::Indirect),
-            253 => Ok(Self::PrivateDns),
-            254 => Ok(Self::PrivateOid),
-            _ => Err(DnsError::InvalidDNSKEYAlgorithm(value)),
-        }
-    }
-}
-
-impl Into<u8> for DNSKEYAlgorithm {
-    fn into(self) -> u8 {
-        match self {
-            Self::Reserved => 0,
-            Self::RSAMD5 => 1,
-            Self::DiffieHellman => 2,
-            Self::DSA => 3,
-            Self::ECC => 4,
-            Self::RSASHA1 => 5,
-            Self::Indirect => 252,
-            Self::PrivateDns => 253,
-            Self::PrivateOid => 254,
+impl From<TLSAMatchingType> for u8 {
+    fn from(matching_type: TLSAMatchingType) -> Self {
+        match matching_type {
+            TLSAMatchingType::ExactMatch => 0,
+            TLSAMatchingType::SHA256 => 1,
+            TLSAMatchingType::SHA512 => 2,
         }
     }
 }

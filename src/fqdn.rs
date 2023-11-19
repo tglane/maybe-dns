@@ -6,7 +6,7 @@ use crate::error::DnsError;
 use crate::util::hash_fqdn;
 use crate::COMPRESSION_MASK_U16;
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub struct FQDN {
     // TODO: Store data in a flattend representation (Vec<u8> instead of Vec<Vec<u8>>)
     data: Vec<Vec<u8>>,
@@ -14,24 +14,16 @@ pub struct FQDN {
 
 impl FQDN {
     pub fn new(name: &str) -> Self {
-        let mut data = Vec::<Vec<u8>>::new();
-
-        let mut part_start = 0;
-        for idx in 0..name.len() + 1 {
-            if idx == name.len() || name.as_bytes()[idx] == '.' as u8 {
-                data.push(name[part_start..idx].as_bytes().to_vec());
-                part_start = idx + 1;
-            }
+        Self {
+            data: name
+                .split('.')
+                .filter(|s| !s.is_empty())
+                .map(|s| s.as_bytes().to_vec())
+                .collect(),
         }
-
-        Self { data }
     }
 
     pub fn to_string(&self) -> String {
-        if self.is_root() {
-            return String::from(".");
-        }
-
         let mut name = String::with_capacity(self.len());
         for (idx, name_part) in self.iter().enumerate() {
             // Safe because the u8 in self.data are parsed from a &str in the constructor
@@ -48,6 +40,10 @@ impl FQDN {
         self.iter().fold(0, |acc, name_part| {
             acc + name_part.len() + if acc == 0 { 0 } else { 1 }
         })
+    }
+
+    pub fn label_count(&self) -> u8 {
+        self.data.len() as u8
     }
 
     pub fn iter(&self) -> std::slice::Iter<Vec<u8>> {
@@ -70,8 +66,8 @@ impl FQDN {
     }
 
     pub fn is_root(&self) -> bool {
-        // Root simply means an empty fqdn
-        self.data.len() == 0
+        // Root simply means "" or "." as fully-qualified domain name
+        self.data.len() == 0 || self.data.iter().all(|sub| sub.len() == 0)
     }
 
     pub fn append_label(&mut self, name: &str) {
@@ -106,23 +102,6 @@ impl<'a> IntoIterator for &'a mut FQDN {
     }
 }
 
-impl ByteConvertible for FQDN {
-    fn byte_size(&self) -> usize {
-        self.len() + 2
-    }
-
-    fn to_bytes(&self) -> Vec<u8> {
-        let mut buffer = Vec::with_capacity(self.byte_size());
-        for name_part in self.iter() {
-            buffer.push(name_part.len() as u8);
-            buffer.extend_from_slice(&name_part);
-        }
-        buffer.push(0);
-
-        buffer
-    }
-}
-
 impl From<&str> for FQDN {
     fn from(value: &str) -> Self {
         Self::new(value)
@@ -134,7 +113,7 @@ impl From<&[&str]> for FQDN {
         let data = value
             .iter()
             .map(|str_part| str_part.as_bytes().to_vec())
-            .collect::<Vec<Vec<u8>>>();
+            .collect();
         Self { data }
     }
 }
@@ -147,7 +126,9 @@ impl From<Vec<Vec<u8>>> for FQDN {
 
 impl From<&[Vec<u8>]> for FQDN {
     fn from(data: &[Vec<u8>]) -> Self {
-        Self { data: data.to_vec() }
+        Self {
+            data: data.to_vec(),
+        }
     }
 }
 
@@ -156,6 +137,31 @@ impl<'a> TryFrom<&mut DnsBuffer<'a>> for FQDN {
 
     fn try_from(buffer: &mut DnsBuffer) -> Result<Self, Self::Error> {
         buffer.extract_fqdn()
+    }
+}
+
+impl ByteConvertible for FQDN {
+    fn byte_size(&self) -> usize {
+        // Initial value is set to 1 to represent the mandatory termination byte '0' that is always
+        // present even for empty FQDNs. For every non-empty label of the FQDN we add the number of
+        // the labels characters and one extra byte to represent the length of the label to the
+        // accumulator
+        self.iter().fold(1, |acc, label| {
+            acc + if label.len() > 0 { 1 + label.len() } else { 0 }
+        })
+    }
+
+    fn to_bytes(&self) -> Vec<u8> {
+        let mut buffer = Vec::with_capacity(self.byte_size());
+        for name_part in self.iter() {
+            if !name_part.is_empty() {
+                buffer.push(name_part.len() as u8);
+                buffer.extend_from_slice(&name_part);
+            }
+        }
+        buffer.push(0);
+
+        buffer
     }
 }
 
@@ -192,6 +198,8 @@ impl CompressedByteConvertible for FQDN {
 
 #[cfg(test)]
 mod tests {
+    use std::cmp::Ordering;
+
     use super::FQDN;
 
     #[test]
@@ -201,5 +209,49 @@ mod tests {
 
         assert_eq!(local.is_link_local(), true);
         assert_eq!(non_local.is_link_local(), false);
+    }
+
+    #[test]
+    fn parse_root() {
+        use crate::ByteConvertible;
+
+        let string_repr = ".";
+        let fqdn = FQDN::from(string_repr);
+
+        assert_eq!(fqdn.byte_size(), 1);
+        assert_eq!(fqdn.to_bytes(), vec![0]);
+        assert_eq!(fqdn.to_string(), String::default());
+        assert_eq!(fqdn.is_root(), true);
+
+        let string_repr = "";
+        let fqdn = FQDN::from(string_repr);
+
+        assert_eq!(fqdn.byte_size(), 1);
+        assert_eq!(fqdn.to_bytes(), vec![0]);
+        assert_eq!(fqdn.to_string(), String::default());
+        assert_eq!(fqdn.is_root(), true);
+    }
+
+    #[test]
+    fn build_root() {
+        let fqdn = FQDN::new(".");
+        assert_eq!(fqdn.to_string(), "");
+
+        let fqdn = FQDN::new("");
+        assert_eq!(fqdn.to_string(), "");
+    }
+
+    #[test]
+    fn ordering() {
+        let a = FQDN::new("google.com");
+        let b = FQDN::new("www.google.com");
+        let c = FQDN::new("aaa.de");
+        let d = FQDN::new("google.de");
+        let e = a.clone();
+
+        assert_eq!(a.cmp(&b), Ordering::Less);
+        assert_eq!(a.cmp(&c), Ordering::Greater);
+        assert_eq!(a.cmp(&d), Ordering::Less);
+        assert_eq!(a.cmp(&e), Ordering::Equal);
     }
 }

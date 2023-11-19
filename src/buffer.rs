@@ -1,4 +1,3 @@
-use std::borrow::Cow;
 use std::convert::From;
 
 use crate::error::DnsError;
@@ -11,7 +10,6 @@ use crate::fqdn::FQDN;
 pub struct DnsBuffer<'a> {
     data: &'a [u8],
     pos: usize,
-    // d: Cow<'a, [u8]>,
 }
 
 impl<'a> DnsBuffer<'a> {
@@ -117,6 +115,10 @@ impl<'a> DnsBuffer<'a> {
                 self.pos += len as usize;
             }
         }
+    }
+
+    pub fn as_slice(&self) -> &[u8] {
+        self.data
     }
 }
 

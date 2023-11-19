@@ -5,8 +5,9 @@ mod fqdn;
 mod header;
 mod packet;
 mod question;
-mod record_data;
+mod rdata;
 mod resource;
+mod resource_record_set;
 mod util;
 
 const COMPRESSION_MASK: u8 = 0b1100_0000;
@@ -24,8 +25,11 @@ pub use self::question::{QClass, QType, Question};
 /// Submodule containing dns resource record type and enums for its dns class and dns type
 pub use self::resource::{RecordClass, RecordType, ResourceRecord};
 
-/// Submodule containing dns record data type used as a payload in a DNS resource
-pub use self::record_data::RecordData;
+/// Submodule containing the representation of a non-owning resource record set
+pub use self::resource_record_set::ResourceRecordSet;
+
+/// Submodule containing all RDATA structures that are specified for DNS and used as payload types
+pub use self::rdata::{RecordData, DNSKEY, DS, NSEC, RRSIG};
 
 /// Submodule containing fully qualified domain name (FQDN) type
 pub use self::fqdn::FQDN;
@@ -49,19 +53,28 @@ mod tests {
         \x01\x00\x00\x01\x00\x00\x00\x00\x00\x00\x06\x67\x6f\x6f\x67\x6c\
         \x65\x03\x63\x6f\x6d\x00\x00\x01\x00\x01";
 
-    const GOOGLE_REPLY_SAMPLE_ONE: &[u8; 204] = b"\x00\x03\x81\x80\x00\x01\x00\x0b\x00\x00\x00\x00\x06\x67\x6f\x6f\x67\x6c\
-        \x65\x03\x63\x6f\x6d\x00\x00\x01\x00\x01\xc0\x0c\x00\x01\x00\x01\x00\x00\x00\x04\x00\x04\x4a\x7d\xec\x23\xc0\
-        \x0c\x00\x01\x00\x01\x00\x00\x00\x04\x00\x04\x4a\x7d\xec\x25\xc0\x0c\x00\x01\x00\x01\x00\x00\x00\x04\x00\x04\
-        \x4a\x7d\xec\x27\xc0\x0c\x00\x01\x00\x01\x00\x00\x00\x04\x00\x04\x4a\x7d\xec\x20\xc0\x0c\x00\x01\x00\x01\x00\
-        \x00\x00\x04\x00\x04\x4a\x7d\xec\x28\xc0\x0c\x00\x01\x00\x01\x00\x00\x00\x04\x00\x04\x4a\x7d\xec\x21\xc0\x0c\
-        \x00\x01\x00\x01\x00\x00\x00\x04\x00\x04\x4a\x7d\xec\x29\xc0\x0c\x00\x01\x00\x01\x00\x00\x00\x04\x00\x04\x4a\
-        \x7d\xec\x22\xc0\x0c\x00\x01\x00\x01\x00\x00\x00\x04\x00\x04\x4a\x7d\xec\x24\xc0\x0c\x00\x01\x00\x01\x00\x00\
-        \x00\x04\x00\x04\x4a\x7d\xec\x2e\xc0\x0c\x00\x01\x00\x01\x00\x00\x00\x04\x00\x04\x4a\x7d\xec\x26";
+    const GOOGLE_REPLY_SAMPLE_ONE: &[u8; 204] = b"\x00\x03\x81\x80\x00\
+        \x01\x00\x0b\x00\x00\x00\x00\x06\x67\x6f\x6f\x67\x6c\x65\x03\x63\
+        \x6f\x6d\x00\x00\x01\x00\x01\xc0\x0c\x00\x01\x00\x01\x00\x00\x00\
+        \x04\x00\x04\x4a\x7d\xec\x23\xc0\x0c\x00\x01\x00\x01\x00\x00\x00\
+        \x04\x00\x04\x4a\x7d\xec\x25\xc0\x0c\x00\x01\x00\x01\x00\x00\x00\
+        \x04\x00\x04\x4a\x7d\xec\x27\xc0\x0c\x00\x01\x00\x01\x00\x00\x00\
+        \x04\x00\x04\x4a\x7d\xec\x20\xc0\x0c\x00\x01\x00\x01\x00\x00\x00\
+        \x04\x00\x04\x4a\x7d\xec\x28\xc0\x0c\x00\x01\x00\x01\x00\x00\x00\
+        \x04\x00\x04\x4a\x7d\xec\x21\xc0\x0c\x00\x01\x00\x01\x00\x00\x00\
+        \x04\x00\x04\x4a\x7d\xec\x29\xc0\x0c\x00\x01\x00\x01\x00\x00\x00\
+        \x04\x00\x04\x4a\x7d\xec\x22\xc0\x0c\x00\x01\x00\x01\x00\x00\x00\
+        \x04\x00\x04\x4a\x7d\xec\x24\xc0\x0c\x00\x01\x00\x01\x00\x00\x00\
+        \x04\x00\x04\x4a\x7d\xec\x2e\xc0\x0c\x00\x01\x00\x01\x00\x00\x00\
+        \x04\x00\x04\x4a\x7d\xec\x26";
 
-    const GOOGLE_REPLY_SAMPLE_TWO: &[u8; 116] = b"\xd5\xad\x81\x80\x00\x01\x00\x05\x00\x00\x00\x00\x03www\x06google\x03com\
-        \x00\x00\x01\x00\x01\xc0\x0c\x00\x05\x00\x01\x00\x00\x00\x05\x00\x08\x03www\x01l\xc0\x10\xc0,\x00\x01\x00\x01\
-        \x00\x00\x00\x05\x00\x04B\xf9[h\xc0,\x00\x01\x00\x01\x00\x00\x00\x05\x00\x04B\xf9[c\xc0,\x00\x01\x00\x01\x00\
-        \x00\x00\x05\x00\x04B\xf9[g\xc0,\x00\x01\x00\x01\x00\x00\x00\x05\x00\x04B\xf9[\x93";
+    const GOOGLE_REPLY_SAMPLE_TWO: &[u8; 116] = b"\xd5\xad\x81\x80\x00\
+        \x01\x00\x05\x00\x00\x00\x00\x03www\x06google\x03com\x00\x00\x01\
+        \x00\x01\xc0\x0c\x00\x05\x00\x01\x00\x00\x00\x05\x00\x08\x03www\
+        \x01l\xc0\x10\xc0,\x00\x01\x00\x01\x00\x00\x00\x05\x00\x04B\xf9[h\
+        \xc0,\x00\x01\x00\x01\x00\x00\x00\x05\x00\x04B\xf9[c\xc0,\x00\x01\
+        \x00\x01\x00\x00\x00\x05\x00\x04B\xf9[g\xc0,\x00\x01\x00\x01\x00\
+        \x00\x00\x05\x00\x04B\xf9[\x93";
 
     #[cfg(feature = "mdns")]
     const IPHONE_MDNS_QUERY_RESPONSE: &[u8; 649] = b"\x00\x00\
@@ -108,7 +121,7 @@ mod tests {
         \xe6\xee\xb0\xca\x90\xe4\xe3";
 
     #[cfg(feature = "mdns")]
-    const M: &[u8; 387] = b"\x00\x00\
+    const MYSTERY: &[u8; 387] = b"\x00\x00\
         \x00\x00\x00\x05\x00\x00\x00\x07\x00\x01\x0f\x57\x6f\x68\x6e\xc2\
         \xad\x7a\x69\x6d\x6d\x65\x72\x20\x54\x56\x0f\x5f\x63\x6f\x6d\x70\
         \x61\x6e\x69\x6f\x6e\x2d\x6c\x69\x6e\x6b\x04\x5f\x74\x63\x70\x05\
@@ -135,49 +148,21 @@ mod tests {
         \x04\x00\x0e\x00\xba\x40\xcb\xc0\xcd\x41\x6d\x40\xcb\xc0\xcd\x41\
         \x6b";
 
-    #[test]
     #[cfg(feature = "mdns")]
-    fn parse_mystery() {
-        let packet = Packet::try_from(&M[..]);
-        assert!(packet.is_ok());
-
-        let packet = packet.unwrap();
-
-        let header = packet.header();
-        assert_eq!(header.ques_count, 5);
-        assert_eq!(header.ans_count, 0);
-        assert_eq!(header.auth_count, 7);
-        assert_eq!(header.add_count, 1);
-
-        assert_eq!(packet.questions().len(), 5);
-        assert_eq!(packet.answers().len(), 0);
-        assert_eq!(packet.authorities().len(), 7);
-        assert_eq!(packet.additionals().len(), 1);
-
-        assert_eq!(&packet.to_bytes_compressed(), M);
-    }
-
-    #[test]
-    #[cfg(feature = "mdns")]
-    fn parse_iphone_mds_query_response() {
-        let packet = Packet::try_from(&IPHONE_MDNS_QUERY_RESPONSE[..]);
-        assert!(packet.is_ok());
-
-        let packet = packet.unwrap();
-
-        let header = packet.header();
-        assert_eq!(header.ques_count, 0);
-        assert_eq!(header.ans_count, 11);
-        assert_eq!(header.auth_count, 0);
-        assert_eq!(header.add_count, 6);
-
-        assert_eq!(packet.questions().len(), 0);
-        assert_eq!(packet.answers().len(), 11);
-        assert_eq!(packet.authorities().len(), 0);
-        assert_eq!(packet.additionals().len(), 6);
-
-        assert_eq!(&packet.to_bytes_compressed(), IPHONE_MDNS_QUERY_RESPONSE);
-    }
+    const MDNS_INCLUDING_NSEC: &[u8; 211] = b"\x00\x00\x84\x00\x00\x00\
+        \x00\x01\x00\x00\x00\x01\x09\x50\x69\x65\x74\x20\xf0\x9f\xab\xa8\
+        \x0f\x5f\x63\x6f\x6d\x70\x61\x6e\x69\x6f\x6e\x2d\x6c\x69\x6e\x6b\
+        \x04\x5f\x74\x63\x70\x05\x6c\x6f\x63\x61\x6c\x00\x00\x10\x80\x01\
+        \x00\x00\x11\x94\x00\x82\x07\x72\x70\x4d\x61\x63\x3d\x30\x11\x72\
+        \x70\x48\x4e\x3d\x65\x61\x33\x64\x33\x64\x39\x64\x38\x63\x32\x62\
+        \x0c\x72\x70\x46\x6c\x3d\x30\x78\x33\x30\x30\x30\x30\x11\x72\x70\
+        \x48\x41\x3d\x64\x33\x38\x62\x61\x37\x38\x63\x66\x34\x61\x36\x0d\
+        \x72\x70\x56\x72\x3d\x35\x30\x30\x2e\x36\x30\x2e\x34\x11\x72\x70\
+        \x41\x44\x3d\x37\x65\x39\x62\x33\x35\x34\x31\x34\x38\x38\x37\x11\
+        \x72\x70\x48\x49\x3d\x39\x36\x39\x65\x30\x61\x30\x33\x35\x35\x34\
+        \x33\x16\x72\x70\x42\x41\x3d\x30\x44\x3a\x34\x39\x3a\x30\x38\x3a\
+        \x43\x42\x3a\x34\x31\x3a\x35\x44\xc0\x0c\x00\x2f\x80\x01\x00\x00\
+        \x11\x94\x00\x09\xc0\x0c\x00\x05\x00\x00\x80\x00\x40";
 
     #[test]
     fn parse_query_from_github() {
@@ -397,4 +382,110 @@ mod tests {
         // Test if compression works
         assert_eq!(reply.to_bytes_compressed(), GOOGLE_REPLY_SAMPLE_TWO);
     }
+
+    #[test]
+    #[cfg(feature = "mdns")]
+    fn parse_mystery() {
+        let packet = Packet::try_from(&MYSTERY[..]);
+        assert!(packet.is_ok());
+
+        let packet = packet.unwrap();
+
+        let header = packet.header();
+        assert_eq!(header.ques_count, 5);
+        assert_eq!(header.ans_count, 0);
+        assert_eq!(header.auth_count, 7);
+        assert_eq!(header.add_count, 1);
+
+        assert_eq!(packet.questions().len(), 5);
+        assert_eq!(packet.answers().len(), 0);
+        assert_eq!(packet.authorities().len(), 7);
+        assert_eq!(packet.additionals().len(), 1);
+
+        assert_eq!(&packet.to_bytes_compressed(), MYSTERY);
+    }
+
+    #[test]
+    #[cfg(feature = "mdns")]
+    fn parse_iphone_mds_query_response() {
+        let packet = Packet::try_from(&IPHONE_MDNS_QUERY_RESPONSE[..]);
+        assert!(packet.is_ok());
+
+        let packet = packet.unwrap();
+
+        let header = packet.header();
+        assert_eq!(header.ques_count, 0);
+        assert_eq!(header.ans_count, 11);
+        assert_eq!(header.auth_count, 0);
+        assert_eq!(header.add_count, 6);
+
+        assert_eq!(packet.questions().len(), 0);
+        assert_eq!(packet.answers().len(), 11);
+        assert_eq!(packet.authorities().len(), 0);
+        assert_eq!(packet.additionals().len(), 6);
+
+        assert_eq!(&packet.to_bytes_compressed(), IPHONE_MDNS_QUERY_RESPONSE);
+    }
+
+    #[test]
+    #[cfg(feature = "mdns")]
+    fn parse_something_with_nsec() {
+        use crate::{RecordClass::*, RecordType::*};
+
+        let packet = Packet::try_from(&MDNS_INCLUDING_NSEC[..]);
+        assert!(packet.is_ok());
+
+        let packet = packet.unwrap();
+        assert_eq!(
+            packet.header().opcode(),
+            crate::header::OpCode::StandardQuery
+        );
+        assert_eq!(packet.questions().len(), 0);
+        assert_eq!(packet.answers().len(), 1);
+        assert_eq!(packet.authorities().len(), 0);
+        assert_eq!(packet.additionals().len(), 1);
+
+        let answer = &packet.answers()[0];
+        assert_eq!(answer.a_type, TXT);
+        assert_eq!(answer.a_class, IN);
+        assert_eq!(
+            answer.a_name.to_string(),
+            "Piet 🫨._companion-link._tcp.local"
+        );
+
+        let add = &packet.additionals()[0];
+        assert_eq!(add.a_type, NSEC);
+        assert_eq!(add.a_class, IN);
+        assert_eq!(add.a_name.to_string(), "Piet 🫨._companion-link._tcp.local");
+
+        assert_eq!(packet.to_bytes_compressed(), MDNS_INCLUDING_NSEC);
+    }
+
+    // #[cfg(feature = "mdns")]
+    // #[test]
+    // fn network_test() {
+    //     use crate::*;
+    //     use std::net::UdpSocket;
+
+    //     let sock = UdpSocket::bind("0.0.0.0:0").expect("Could not create socket");
+    //     sock.set_multicast_loop_v4(true).unwrap();
+
+    //     let mut packet = Packet::new_query(0, false);
+    //     packet.add_question(Question::new(
+    //         "_googlecast._tcp.local".into(),
+    //         QType::PTR,
+    //         QClass::IN,
+    //     ));
+
+    //     sock.send_to(&packet.to_bytes(), "224.0.0.251:5353")
+    //         .expect("Could not send data");
+
+    //     let mut buf = [0_u8; 1024];
+    //     let (bytes_recv, _) = sock.recv_from(&mut buf).expect("");
+
+    //     let response = Packet::try_from(&buf[..bytes_recv]).expect("Failed to parse mDNS response");
+
+    //     println!("Res: {:?}", response);
+    //     assert!(false);
+    // }
 }

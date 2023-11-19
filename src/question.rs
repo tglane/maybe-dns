@@ -36,6 +36,29 @@ impl TryFrom<u16> for QClass {
     }
 }
 
+impl From<QClass> for u16 {
+    fn from(value: QClass) -> Self {
+        match value {
+            QClass::IN => 1,
+            QClass::CS => 2,
+            QClass::CH => 3,
+            QClass::HS => 4,
+            QClass::NONE => 254,
+            QClass::ANY => 255,
+        }
+    }
+}
+
+impl ByteConvertible for QClass {
+    fn byte_size(&self) -> usize {
+        std::mem::size_of::<u16>()
+    }
+
+    fn to_bytes(&self) -> Vec<u8> {
+        u16::to_be_bytes(u16::from(*self)).to_vec()
+    }
+}
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum QType {
     // General RecordType types
@@ -88,6 +111,42 @@ impl TryFrom<u16> for QType {
         }
     }
 }
+
+impl From<QType> for u16 {
+    fn from(value: QType) -> Self {
+        match value {
+            QType::A => 1,
+            QType::NS => 2,
+            QType::CNAME => 5,
+            QType::SOA => 6,
+            QType::NULL => 10,
+            QType::WKS => 11,
+            QType::PTR => 12,
+            QType::HINFO => 13,
+            QType::MINFO => 14,
+            QType::MX => 15,
+            QType::TXT => 16,
+            QType::AAAA => 28,
+            QType::SRV => 33,
+            QType::NSEC => 47,
+            QType::AXFR => 252,
+            QType::MAILB => 253,
+            QType::MAILA => 254,
+            QType::ANY => 255,
+        }
+    }
+}
+
+impl ByteConvertible for QType {
+    fn byte_size(&self) -> usize {
+        std::mem::size_of::<u16>()
+    }
+
+    fn to_bytes(&self) -> Vec<u8> {
+        u16::to_be_bytes(u16::from(*self)).to_vec()
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Question {
     pub(super) q_name: FQDN,
