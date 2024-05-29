@@ -1,4 +1,5 @@
 use modular_bitfield::prelude::{bitfield, B1, B3, B4};
+use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
 use std::mem::{size_of, transmute};
 
@@ -53,8 +54,7 @@ impl Header {
     }
 
     pub fn recursion_desired(&self) -> bool {
-        // SAFETY: rd is only set through set_rd function of constructor from a bool
-        unsafe { transmute(self.flags.rd()) }
+        self.flags.rd() != 0
     }
 
     pub fn set_recursion_desired(&mut self, rd: bool) {
@@ -63,8 +63,7 @@ impl Header {
     }
 
     pub fn truncation(&self) -> bool {
-        // SAFETY: tc is only set through set_rd function of constructor from a bool
-        unsafe { transmute(self.flags.tc()) }
+        self.flags.tc() != 0
     }
 
     pub fn set_truncation(&mut self, tc: bool) {
@@ -73,8 +72,7 @@ impl Header {
     }
 
     pub fn authoritative_answer(&self) -> bool {
-        // SAFETY: aa is only set through set_rd function of constructor from a bool
-        unsafe { transmute(self.flags.aa()) }
+        self.flags.aa() != 0
     }
 
     pub fn set_authoritative_answer(&mut self, aa: bool) {
@@ -93,8 +91,7 @@ impl Header {
     }
 
     pub fn query_response(&self) -> bool {
-        // SAFETY: qr is only set through set_rd function of constructor from a bool
-        unsafe { transmute(self.flags.qr()) }
+        self.flags.qr() != 0
     }
 
     pub fn set_query_response(&mut self, qr: bool) {
@@ -127,8 +124,7 @@ impl Header {
     }
 
     pub fn recursion_available(&self) -> bool {
-        // SAFETY: ra is only set through set_rd function of constructor from a bool
-        unsafe { transmute(self.flags.ra()) }
+        self.flags.ra() != 0
     }
 
     pub fn set_recursion_available(&mut self, ra: bool) {
@@ -144,7 +140,7 @@ impl Header {
 
 impl ByteConvertible for Header {
     fn byte_size(&self) -> usize {
-        return Self::SIZE;
+        Self::SIZE
     }
 
     fn to_bytes(&self) -> Vec<u8> {
@@ -160,11 +156,12 @@ impl ByteConvertible for Header {
 }
 
 impl CompressedByteConvertible for Header {
-    fn to_bytes_compressed(
-        &self,
-        _: &mut std::collections::HashMap<u64, usize>,
-        _: usize,
-    ) -> Vec<u8> {
+    fn byte_size_compressed(&self, _: &mut HashMap<u64, usize>, _: usize) -> usize {
+        // There is nothing to compress in the header
+        self.byte_size()
+    }
+
+    fn to_bytes_compressed(&self, _: &mut HashMap<u64, usize>, _: usize) -> Vec<u8> {
         // There is nothing to compress in the header
         self.to_bytes()
     }
@@ -243,6 +240,13 @@ pub enum ResponseCode {
     NXRRSet = 8,
     NotAuth = 9,
     NotZone = 10,
+    BadSig = 16,
+    BadKey = 17,
+    BadTime = 18,
+    BadMode = 19,
+    BadName = 20,
+    BadAlg = 21,
+    BadTrunc = 22,
 }
 
 impl TryFrom<u8> for ResponseCode {
@@ -261,6 +265,12 @@ impl TryFrom<u8> for ResponseCode {
             8 => Ok(ResponseCode::NXRRSet),
             9 => Ok(ResponseCode::NotAuth),
             10 => Ok(ResponseCode::NotZone),
+            17 => Ok(ResponseCode::BadKey),
+            18 => Ok(ResponseCode::BadTime),
+            19 => Ok(ResponseCode::BadMode),
+            20 => Ok(ResponseCode::BadName),
+            21 => Ok(ResponseCode::BadAlg),
+            22 => Ok(ResponseCode::BadTrunc),
             _ => Err(DnsError::InvalidResponseCode(code)),
         }
     }

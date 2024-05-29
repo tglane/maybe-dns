@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::mem::size_of;
 
@@ -239,8 +240,7 @@ impl ByteConvertible for Question {
     }
 
     fn to_bytes(&self) -> Vec<u8> {
-        let mut buffer =
-            Vec::with_capacity(self.q_name.byte_size() + size_of::<u16>() + size_of::<u16>());
+        let mut buffer = Vec::with_capacity(self.q_name.byte_size() + (2 * size_of::<u16>()));
 
         buffer.extend_from_slice(&self.q_name.to_bytes());
 
@@ -264,11 +264,11 @@ impl ByteConvertible for Question {
 }
 
 impl CompressedByteConvertible for Question {
-    fn to_bytes_compressed(
-        &self,
-        names: &mut std::collections::HashMap<u64, usize>,
-        offset: usize,
-    ) -> Vec<u8> {
+    fn byte_size_compressed(&self, names: &mut HashMap<u64, usize>, offset: usize) -> usize {
+        self.q_name.byte_size_compressed(names, offset) + (2 * size_of::<u16>())
+    }
+
+    fn to_bytes_compressed(&self, names: &mut HashMap<u64, usize>, offset: usize) -> Vec<u8> {
         let mut buffer = Vec::new();
 
         buffer.extend_from_slice(&self.q_name.to_bytes_compressed(names, offset));

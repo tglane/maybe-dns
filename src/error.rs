@@ -8,12 +8,21 @@ pub enum DnsError {
     InvalidPacketData,
     LengthViolation,
     UnresolveableCompressionPointer,
+    InvalidAplFamily(u16),
+    InvalidCsyncFlag(u16),
     InvalidSSHFPAlgorithm(u8),
     InvalidSSHFPFingerprintType(u8),
+    InvalidIpSecKeyGatewayType(u8),
+    InvalidNaptrFlag(u8),
+    InvalidTkeyMode(u16),
+    InvalidTkeyError(u16),
+    InvalidIdentifierTypeError(u16),
+    InvalidTLSACertUsage(u8),
     InvalidTLSASelector(u8),
     InvalidTLSAMatchingType(u8),
+    InvalidSvcbParam(u16),
+    InvalidDigestType(u8),
     InvalidDnsSecAlgorithm(u8),
-    InvalidDnsSecDigestType(u8),
     InvalidDnsSecSignatureTimespan(SystemTimeError),
     DnsSecVerificationError(String),
     DnsSecSigningError(String),
@@ -27,7 +36,7 @@ impl std::error::Error for DnsError {
 
 impl std::fmt::Display for DnsError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "DnsError: {}", &self)
+        write!(f, "DnsError: {:?}", &self)
     }
 }
 

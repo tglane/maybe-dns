@@ -5,7 +5,7 @@ mod fqdn;
 mod header;
 mod packet;
 mod question;
-mod rdata;
+pub mod rdata;
 mod resource;
 mod resource_record_set;
 mod util;
@@ -29,7 +29,7 @@ pub use self::resource::{RecordClass, RecordType, ResourceRecord};
 pub use self::resource_record_set::ResourceRecordSet;
 
 /// Submodule containing all RDATA structures that are specified for DNS and used as payload types
-pub use self::rdata::{RecordData, DNSKEY, DS, NSEC, RRSIG};
+pub use self::rdata::{Algorithm, RData, RecordData};
 
 /// Submodule containing fully qualified domain name (FQDN) type
 pub use self::fqdn::FQDN;
@@ -46,6 +46,8 @@ pub use self::byteconvertible::ByteConvertible;
 #[cfg(test)]
 mod tests {
     use std::{convert::TryFrom, net::Ipv4Addr, str::FromStr};
+
+    use crate::rdata::RData;
 
     use super::*;
 
@@ -255,9 +257,9 @@ mod tests {
         assert_eq!(4, packet.answers()[0].time_to_live);
         assert_eq!(4, packet.answers()[0].rdata.byte_size());
 
-        match &packet.answers()[0].rdata {
-            RecordData::A(address) => {
-                assert_eq!(1249766435, u32::from(*address));
+        match packet.answers()[0].rdata {
+            RecordData::A(ref address) => {
+                assert_eq!(1249766435, u32::from(address.clone()));
             }
             _ => panic!("invalid RDATA"),
         }
@@ -266,7 +268,7 @@ mod tests {
     }
 
     #[test]
-    fn parst_complex_reply_google_com() {
+    fn parse_complex_reply_google_com() {
         let packet = Packet::try_from(&GOOGLE_REPLY_SAMPLE_TWO[..]);
         assert!(packet.is_ok());
 
@@ -301,7 +303,7 @@ mod tests {
         );
         assert_eq!(
             first_record.rdata,
-            RecordData::CNAME(FQDN::new("www.l.google.com"))
+            rdata::Cname::new(FQDN::new("www.l.google.com")).into_record_data()
         );
 
         for idx in 1..packet.answers().len() {
@@ -344,7 +346,7 @@ mod tests {
             RecordType::CNAME,
             RecordClass::IN,
             5,
-            RecordData::CNAME(FQDN::from("www.l.google.com")),
+            rdata::Cname::new(FQDN::from("www.l.google.com")).into_record_data(),
         ));
 
         reply.add_answer(ResourceRecord::new(
@@ -352,7 +354,7 @@ mod tests {
             RecordType::A,
             RecordClass::IN,
             5,
-            RecordData::A(Ipv4Addr::from_str("66.249.91.104").unwrap()),
+            RecordData::A(Ipv4Addr::from_str("66.249.91.104").unwrap().into()),
         ));
 
         reply.add_answer(ResourceRecord::new(
@@ -360,7 +362,7 @@ mod tests {
             RecordType::A,
             RecordClass::IN,
             5,
-            RecordData::A(Ipv4Addr::from_str("66.249.91.99").unwrap()),
+            RecordData::A(Ipv4Addr::from_str("66.249.91.99").unwrap().into()),
         ));
 
         reply.add_answer(ResourceRecord::new(
@@ -368,7 +370,7 @@ mod tests {
             RecordType::A,
             RecordClass::IN,
             5,
-            RecordData::A(Ipv4Addr::from_str("66.249.91.103").unwrap()),
+            RecordData::A(rdata::A::try_from("66.249.91.103").unwrap()),
         ));
 
         reply.add_answer(ResourceRecord::new(
@@ -376,7 +378,7 @@ mod tests {
             RecordType::A,
             RecordClass::IN,
             5,
-            RecordData::A(Ipv4Addr::from_str("66.249.91.147").unwrap()),
+            RecordData::A(rdata::A::try_from("66.249.91.147").unwrap()),
         ));
 
         // Test if compression works
@@ -406,7 +408,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "mdns")]
+    #[cfg(all(feature = "mdns", feature = "dnssec"))]
     fn parse_iphone_mds_query_response() {
         let packet = Packet::try_from(&IPHONE_MDNS_QUERY_RESPONSE[..]);
         assert!(packet.is_ok());
@@ -428,10 +430,8 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "mdns")]
+    #[cfg(all(feature = "mdns", feature = "dnssec"))]
     fn parse_something_with_nsec() {
-        use crate::{RecordClass::*, RecordType::*};
-
         let packet = Packet::try_from(&MDNS_INCLUDING_NSEC[..]);
         assert!(packet.is_ok());
 
@@ -446,16 +446,16 @@ mod tests {
         assert_eq!(packet.additionals().len(), 1);
 
         let answer = &packet.answers()[0];
-        assert_eq!(answer.a_type, TXT);
-        assert_eq!(answer.a_class, IN);
+        assert_eq!(answer.a_type, RecordType::TXT);
+        assert_eq!(answer.a_class, RecordClass::IN);
         assert_eq!(
             answer.a_name.to_string(),
             "Piet 🫨._companion-link._tcp.local"
         );
 
         let add = &packet.additionals()[0];
-        assert_eq!(add.a_type, NSEC);
-        assert_eq!(add.a_class, IN);
+        assert_eq!(add.a_type, RecordType::NSEC);
+        assert_eq!(add.a_class, RecordClass::IN);
         assert_eq!(add.a_name.to_string(), "Piet 🫨._companion-link._tcp.local");
 
         assert_eq!(packet.to_bytes_compressed(), MDNS_INCLUDING_NSEC);

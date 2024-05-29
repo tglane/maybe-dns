@@ -93,7 +93,7 @@ impl<'a> ByteConvertible for ResourceRecordSet<'a> {
             binary.extend_from_slice(&name_bin);
             binary.extend_from_slice(&u16::to_be_bytes(self.set_type.into()));
             binary.extend_from_slice(&u16::to_be_bytes(self.set_class.into()));
-            binary.extend_from_slice(&u32::to_be_bytes(self.ttl.into()));
+            binary.extend_from_slice(&u32::to_be_bytes(self.ttl));
             binary.extend_from_slice(&u16::to_be_bytes(bin.len() as u16));
             binary.extend_from_slice(&bin);
         }

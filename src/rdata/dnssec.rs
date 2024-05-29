@@ -1,11 +1,13 @@
 use rsa::BigUint;
+use std::collections::{BTreeSet, HashMap};
+use std::fmt::Write;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::buffer::DnsBuffer;
 use crate::byteconvertible::{ByteConvertible, CompressedByteConvertible};
 use crate::error::DnsError;
 use crate::fqdn::FQDN;
-use crate::resource::RecordType;
+use crate::rdata::{RData, RecordData, RecordType};
 use crate::resource_record_set::ResourceRecordSet;
 
 /// The NSEC resource record lists two separate things: the next owner
@@ -17,59 +19,46 @@ use crate::resource_record_set::ResourceRecordSet;
 /// zone.  This information is used to provide authenticated denial of
 /// existence for DNS data, as described in [RFC4035].
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct NSEC {
-    next_domain_name: FQDN,
-    types: Vec<RecordType>,
+pub struct Nsec {
+    pub next_domain_name: FQDN,
+    pub types: BTreeSet<RecordType>,
 }
 
-impl NSEC {
+impl Nsec {
     pub fn new(next_domain_name: FQDN) -> Self {
         Self {
             next_domain_name,
-            types: Vec::new(),
+            types: BTreeSet::new(),
         }
     }
 
-    pub fn with_types(next_domain_name: FQDN, mut types: Vec<RecordType>) -> Self {
+    pub fn with_types(next_domain_name: FQDN, types: BTreeSet<RecordType>) -> Self {
         // Make sure the types bitmap is always sorted
-        types.sort_by(|a, b| (*a as u16).cmp(&(*b as u16)));
         Self {
             next_domain_name,
             types,
         }
     }
+}
 
-    pub fn next_domain_name(&self) -> &FQDN {
-        &self.next_domain_name
+impl RData for Nsec {
+    fn record_type(&self) -> RecordType {
+        RecordType::NSEC
     }
 
-    pub fn types(&self) -> &[RecordType] {
-        &self.types
-    }
-
-    /// Inserts a new record type into the type bit map
-    /// The record type is inserted at the correct place to ensure the bitmap stays sorted
-    pub fn add_rtype(&mut self, rtype: RecordType) {
-        for (idx, stored_type) in self.types.iter().enumerate() {
-            if *stored_type as u16 > rtype as u16 {
-                self.types.insert(idx, rtype);
-                return;
-            } else if rtype == *stored_type {
-                return;
-            }
-        }
-        self.types.push(rtype);
+    fn into_record_data(self) -> RecordData {
+        RecordData::NSEC(self)
     }
 }
 
-impl<'a> TryFrom<&mut DnsBuffer<'a>> for NSEC {
+impl<'a> TryFrom<&mut DnsBuffer<'a>> for Nsec {
     type Error = DnsError;
 
     fn try_from(buffer: &mut DnsBuffer<'a>) -> Result<Self, Self::Error> {
         let next_domain_name = buffer.extract_fqdn()?;
 
         // Extract the mentioned record types from the binary data representation
-        let mut types = Vec::new();
+        let mut types = BTreeSet::new();
         while buffer.remaining() > 0 {
             let window_num = buffer.extract_u8()? as u16;
             let window_len = buffer.extract_u8()? as u16;
@@ -81,7 +70,7 @@ impl<'a> TryFrom<&mut DnsBuffer<'a>> for NSEC {
                 for i in 0..8 {
                     if (octet << i) & 0x80 > 0 {
                         let bit_position = (256 * window_num) + (8 * index as u16) + i;
-                        types.push(RecordType::try_from(bit_position)?);
+                        types.insert(RecordType::try_from(bit_position)?);
                     }
                 }
             }
@@ -94,62 +83,92 @@ impl<'a> TryFrom<&mut DnsBuffer<'a>> for NSEC {
     }
 }
 
-impl ByteConvertible for NSEC {
-    #[inline(always)]
+impl ByteConvertible for Nsec {
+    #[inline]
     fn byte_size(&self) -> usize {
         let mut byte_size = self.next_domain_name.byte_size();
 
+        let mut rtype_iter = self.types.iter().peekable();
         let mut block_num: u16 = 0;
-        for i in 0..=self.types.len() {
-            if i == self.types.len() || self.types[i] as u16 - (block_num * 32) > 255 {
-                // Update length with next finished block
+        let mut last_rtype = None;
+        loop {
+            let rtype = rtype_iter.next();
+            if rtype.is_none() || *rtype.unwrap() as u16 - (block_num * 32) > 255 {
                 byte_size += 2; // window number and block length
-                let num_octets = ((self.types[i - 1] as u16 / 8) - (32 * block_num)) as usize;
+                let num_octets = ((last_rtype.unwrap_or(0) / 8) - (32 * block_num)) as usize;
                 byte_size += num_octets + 1; // Octet index of last entry equals the block length
 
+                if rtype.is_none() {
+                    break;
+                }
                 block_num += 1;
             }
+            last_rtype = rtype.map(|r| *r as u16);
         }
 
-        return byte_size;
+        byte_size
     }
 
     fn to_bytes(&self) -> Vec<u8> {
-        let mut buffer = Vec::new();
+        let mut buffer = Vec::with_capacity(self.byte_size());
         buffer.extend_from_slice(&self.next_domain_name.to_bytes());
 
         // Encode windows {u8 windowblock, u8 bitmaplength, 0-32u8 bitmap}
         // Each Block is 0-255 upper octet of types, length if 0-32
         let mut block_num = 0;
-        let mut block_len: u8 = 0;
+        let mut block_len = 0_u8;
         let mut block_data = [0_u8; 32];
-        for i in 0..=self.types.len() {
-            if i == self.types.len() || self.types[i] as u16 - (block_num * 32) > 255 {
-                // Finish last block by pushing it into the output buffer
+
+        let mut rtype_iter = self.types.iter().peekable();
+        loop {
+            let rtype = rtype_iter.next();
+            if rtype.is_none() || *rtype.unwrap() as u16 - (block_num * 32) > 255 {
+                // Finish block by pushing it into the output buffer
                 buffer.push(block_num as u8);
-                buffer.push(block_len + 1 as u8);
+                buffer.push(block_len + 1_u8);
                 buffer.extend_from_slice(&block_data[0..=block_len as usize]);
 
-                // Start new block
+                if rtype.is_none() {
+                    break;
+                }
                 block_num += 1;
-                block_len = 0;
                 block_data.fill(0);
             }
 
-            if i < self.types.len() {
-                // Continue in previous block
-                block_len = ((self.types[i] as u16 / 8) - (32 * block_num)) as u8;
-                let bit_in_octet = self.types[i] as u16 % 8;
-
-                block_data[block_len as usize] |= 128 >> bit_in_octet as u8;
-            }
+            block_len = ((*rtype.unwrap() as u16 / 8) - (32 * block_num)) as u8;
+            let bit_in_octet = *rtype.unwrap() as u16 % 8;
+            block_data[block_len as usize] |= 128 >> bit_in_octet as u8;
         }
 
         buffer
     }
 }
 
-impl CompressedByteConvertible for NSEC {
+impl CompressedByteConvertible for Nsec {
+    fn byte_size_compressed(&self, names: &mut HashMap<u64, usize>, offset: usize) -> usize {
+        let mut byte_size = self.next_domain_name.byte_size_compressed(names, offset);
+
+        let mut rtype_iter = self.types.iter().peekable();
+        let mut block_num: u16 = 0;
+        let mut last_rtype = None;
+        loop {
+            let rtype = rtype_iter.next();
+            if rtype.is_none() || *rtype.unwrap() as u16 - (block_num * 32) > 255 {
+                byte_size += 2; // window number and block length
+                let num_octets = ((last_rtype.unwrap_or(0) / 8) - (32 * block_num)) as usize;
+                byte_size += num_octets + 1; // Octet index of last entry equals the block length
+
+                if rtype.is_none() {
+                    break;
+                }
+                block_num += 1;
+            }
+            last_rtype = rtype.map(|r| *r as u16);
+        }
+
+        byte_size
+    }
+
     fn to_bytes_compressed(
         &self,
         names: &mut std::collections::HashMap<u64, usize>,
@@ -161,28 +180,28 @@ impl CompressedByteConvertible for NSEC {
         // Encode windows {u8 windowblock, u8 bitmaplength, 0-32u8 bitmap}
         // Each Block is 0-255 upper octet of types, length if 0-32
         let mut block_num = 0;
-        let mut block_len: u8 = 0;
+        let mut block_len = 0_u8;
         let mut block_data = [0_u8; 32];
-        for i in 0..=self.types.len() {
-            if i == self.types.len() || self.types[i] as u16 - (block_num * 32) > 255 {
-                // Finish last block by pushing it into the output buffer
+
+        let mut rtype_iter = self.types.iter().peekable();
+        loop {
+            let rtype = rtype_iter.next();
+            if rtype.is_none() || *rtype.unwrap() as u16 - (block_num * 32) > 255 {
+                // Finish block by pushing it into the output buffer
                 buffer.push(block_num as u8);
-                buffer.push(block_len + 1 as u8);
+                buffer.push(block_len + 1_u8);
                 buffer.extend_from_slice(&block_data[0..=block_len as usize]);
 
-                // Start new block
+                if rtype.is_none() {
+                    break;
+                }
                 block_num += 1;
-                block_len = 0;
                 block_data.fill(0);
             }
 
-            if i < self.types.len() {
-                // Continue in previous block
-                block_len = ((self.types[i] as u16 / 8) - (32 * block_num)) as u8;
-                let bit_in_octet = self.types[i] as u16 % 8;
-
-                block_data[block_len as usize] |= 128 >> bit_in_octet as u8;
-            }
+            block_len = ((*rtype.unwrap() as u16 / 8) - (32 * block_num)) as u8;
+            let bit_in_octet = *rtype.unwrap() as u16 % 8;
+            block_data[block_len as usize] |= 128 >> bit_in_octet as u8;
         }
 
         buffer
@@ -196,15 +215,15 @@ impl CompressedByteConvertible for NSEC {
 /// using a private key and stores the corresponding public key in a
 /// DNSKEY RR.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct DNSKEY {
-    zone_key: bool,
-    secure_entry_point: bool,
+pub struct DnsKey {
+    pub zone_key: bool,
+    pub secure_entry_point: bool,
     protocol: u8,
-    algorithm: Algorithm,
-    public_key: Vec<u8>,
+    pub algorithm: Algorithm,
+    pub public_key: Vec<u8>,
 }
 
-impl DNSKEY {
+impl DnsKey {
     pub fn new(algorithm: Algorithm, public_key: Vec<u8>) -> Self {
         Self {
             zone_key: false,
@@ -215,22 +234,6 @@ impl DNSKEY {
         }
     }
 
-    pub fn zone_key(&self) -> bool {
-        self.zone_key
-    }
-
-    pub fn set_zone_key(&mut self, zone_key: bool) {
-        self.zone_key = zone_key;
-    }
-
-    pub fn secure_entry_point(&self) -> bool {
-        self.secure_entry_point
-    }
-
-    pub fn set_secure_entry_point(&mut self, secure_entry_point: bool) {
-        self.secure_entry_point = secure_entry_point;
-    }
-
     pub fn protocol(&self) -> u8 {
         self.protocol
     }
@@ -239,14 +242,6 @@ impl DNSKEY {
     pub fn valid_protocol(&self) -> bool {
         // Only if protocol is equal to 3 it is valid
         self.protocol == 3
-    }
-
-    pub fn algorithm(&self) -> Algorithm {
-        self.algorithm
-    }
-
-    pub fn public_key(&self) -> &[u8] {
-        &self.public_key
     }
 
     /// The base64-encoded public key.
@@ -272,11 +267,11 @@ impl DNSKEY {
                 }
             });
         key_tag += (key_tag >> 16) & 0xFFFF;
-        return (key_tag & 0xFFFF) as u16;
+        (key_tag & 0xFFFF) as u16
     }
 }
 
-impl<'a> TryFrom<&mut DnsBuffer<'a>> for DNSKEY {
+impl<'a> TryFrom<&mut DnsBuffer<'a>> for DnsKey {
     type Error = DnsError;
 
     fn try_from(buffer: &mut DnsBuffer<'a>) -> Result<Self, Self::Error> {
@@ -295,7 +290,17 @@ impl<'a> TryFrom<&mut DnsBuffer<'a>> for DNSKEY {
     }
 }
 
-impl ByteConvertible for DNSKEY {
+impl RData for DnsKey {
+    fn record_type(&self) -> RecordType {
+        RecordType::DNSKEY
+    }
+
+    fn into_record_data(self) -> RecordData {
+        RecordData::DNSKEY(self)
+    }
+}
+
+impl ByteConvertible for DnsKey {
     #[inline(always)]
     fn byte_size(&self) -> usize {
         4 + self.public_key.len()
@@ -322,14 +327,14 @@ impl ByteConvertible for DNSKEY {
 /// record points.  The key authentication process is described in
 /// [RFC4035].
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct DS {
-    key_tag: u16,
-    algorithm: Algorithm,
-    digest_type: DigestType,
-    digest: Vec<u8>,
+pub struct Ds {
+    pub key_tag: u16,
+    pub algorithm: Algorithm,
+    pub digest_type: DigestType,
+    pub digest: Vec<u8>,
 }
 
-impl DS {
+impl Ds {
     pub fn new(
         key_tag: u16,
         algorithm: Algorithm,
@@ -346,7 +351,7 @@ impl DS {
 
     pub fn try_from_dnskey(
         owner_name: &FQDN,
-        dnskey: &DNSKEY,
+        dnskey: &DnsKey,
         digest_type: DigestType,
     ) -> Result<Self, DnsError> {
         let mut digest_data = Vec::with_capacity(owner_name.byte_size() + dnskey.byte_size());
@@ -361,32 +366,19 @@ impl DS {
         })
     }
 
-    pub fn digest(&self) -> &[u8] {
-        &self.digest
-    }
-
     /// Returns the hexadecimal representation of the digest
     pub fn hex_digest(&self) -> String {
-        self.digest
-            .iter()
-            .map(|byte| format!("{:02X}", byte))
-            .collect()
-    }
-
-    pub fn key_tag(&self) -> u16 {
-        self.key_tag
-    }
-
-    pub fn algorithm(&self) -> Algorithm {
-        self.algorithm
-    }
-
-    pub fn digest_type(&self) -> DigestType {
-        self.digest_type
+        self.digest.iter().fold(
+            String::with_capacity(2 * self.digest.len()),
+            |mut output, byte| {
+                let _ = write!(output, "{byte:02X}");
+                output
+            },
+        )
     }
 }
 
-impl<'a> TryFrom<&mut DnsBuffer<'a>> for DS {
+impl<'a> TryFrom<&mut DnsBuffer<'a>> for Ds {
     type Error = DnsError;
 
     fn try_from(buffer: &mut DnsBuffer<'a>) -> Result<Self, Self::Error> {
@@ -399,7 +391,17 @@ impl<'a> TryFrom<&mut DnsBuffer<'a>> for DS {
     }
 }
 
-impl ByteConvertible for DS {
+impl RData for Ds {
+    fn record_type(&self) -> RecordType {
+        RecordType::DS
+    }
+
+    fn into_record_data(self) -> RecordData {
+        RecordData::DS(self)
+    }
+}
+
+impl ByteConvertible for Ds {
     #[inline(always)]
     fn byte_size(&self) -> usize {
         4 + self.digest.len()
@@ -421,7 +423,7 @@ impl ByteConvertible for DS {
 /// Key Tag to identify the DNSKEY RR containing the public key that a
 /// validator can use to verify the signature.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct RRSIG {
+pub struct Rrsig {
     type_covered: RecordType,
     algorithm: Algorithm,
     labels: u8,
@@ -433,7 +435,8 @@ pub struct RRSIG {
     signature: Vec<u8>,
 }
 
-impl RRSIG {
+impl Rrsig {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         type_covered: RecordType,
         algorithm: Algorithm,
@@ -459,7 +462,7 @@ impl RRSIG {
     }
 
     pub fn from_dnskey(
-        dnskey: &DNSKEY,
+        dnskey: &DnsKey,
         rr_set: &ResourceRecordSet,
         inception: &SystemTime,
         expiration: &SystemTime,
@@ -467,11 +470,11 @@ impl RRSIG {
     ) -> Result<Self, DnsError> {
         let expiration = expiration
             .duration_since(UNIX_EPOCH)
-            .map_err(|err| DnsError::InvalidDnsSecSignatureTimespan(err))?
+            .map_err(DnsError::InvalidDnsSecSignatureTimespan)?
             .as_millis() as u32;
         let inception = inception
             .duration_since(UNIX_EPOCH)
-            .map_err(|err| DnsError::InvalidDnsSecSignatureTimespan(err))?
+            .map_err(DnsError::InvalidDnsSecSignatureTimespan)?
             .as_millis() as u32;
 
         let mut rrsig = Self {
@@ -488,7 +491,7 @@ impl RRSIG {
 
         rrsig.calculate_signature(rr_set, private_key)?;
 
-        return Ok(rrsig);
+        Ok(rrsig)
     }
 
     pub fn key_tag(&self) -> u16 {
@@ -505,7 +508,7 @@ impl RRSIG {
         general_purpose::STANDARD.encode(&self.signature)
     }
 
-    pub fn verify(&self, dnskey: &DNSKEY, rr_set: &ResourceRecordSet) -> Result<bool, DnsError> {
+    pub fn verify(&self, dnskey: &DnsKey, rr_set: &ResourceRecordSet) -> Result<bool, DnsError> {
         if self.algorithm != dnskey.algorithm {
             // Signature can not be created by the key if the algorithms do not match
             return Err(DnsError::DnsSecVerificationError(
@@ -553,7 +556,7 @@ impl RRSIG {
             _ => sig,
         };
 
-        let mut public_key_data = DnsBuffer::from(dnskey.public_key());
+        let mut public_key_data = DnsBuffer::from(dnskey.public_key.as_ref());
         match self.algorithm {
             Algorithm::RSA_MD5
             | Algorithm::RSA_SHA1
@@ -673,7 +676,7 @@ impl RRSIG {
     }
 }
 
-impl<'a> TryFrom<&mut DnsBuffer<'a>> for RRSIG {
+impl<'a> TryFrom<&mut DnsBuffer<'a>> for Rrsig {
     type Error = DnsError;
 
     fn try_from(buffer: &mut DnsBuffer<'a>) -> Result<Self, Self::Error> {
@@ -691,7 +694,17 @@ impl<'a> TryFrom<&mut DnsBuffer<'a>> for RRSIG {
     }
 }
 
-impl ByteConvertible for RRSIG {
+impl RData for Rrsig {
+    fn record_type(&self) -> RecordType {
+        RecordType::RRSIG
+    }
+
+    fn into_record_data(self) -> RecordData {
+        RecordData::RRSIG(self)
+    }
+}
+
+impl ByteConvertible for Rrsig {
     #[inline(always)]
     fn byte_size(&self) -> usize {
         17 + self.signers_name.len() + self.signature.len()
@@ -953,7 +966,7 @@ impl TryFrom<u8> for DigestType {
             2 => Ok(Self::SHA256),
             4 => Ok(Self::SHA384),
             5 => Ok(Self::SHA512),
-            _ => Err(DnsError::InvalidDnsSecDigestType(value)),
+            _ => Err(DnsError::InvalidDigestType(value)),
         }
     }
 }
@@ -971,7 +984,9 @@ impl From<DigestType> for u8 {
 
 #[cfg(test)]
 mod tests {
+    use crate::rdata;
     use crate::*;
+    use std::collections::BTreeSet;
 
     #[test]
     fn parse_nsec() {
@@ -981,32 +996,35 @@ mod tests {
             let binary = b"\x00\x00\x06\x40\x00\x80\x08\x00\x03";
             let mut buffer = crate::buffer::DnsBuffer::from(&binary[..]);
 
-            let nsec = super::NSEC::try_from(&mut buffer);
+            let nsec = super::Nsec::try_from(&mut buffer);
             assert!(nsec.is_ok());
 
             let nsec = nsec.unwrap();
-            assert_eq!(nsec.types, vec![A, TXT, AAAA, RRSIG, NSEC]);
+            assert_eq!(nsec.types, BTreeSet::from([A, TXT, AAAA, RRSIG, NSEC]));
         }
         {
             let binary = b"\x00\x00\x07\x62\x00\x80\x08\x00\x03\x80";
             let mut buffer = crate::buffer::DnsBuffer::from(&binary[..]);
 
-            let nsec = super::NSEC::try_from(&mut buffer);
+            let nsec = super::Nsec::try_from(&mut buffer);
             assert!(nsec.is_ok());
 
             let mut nsec = nsec.unwrap();
-            assert_eq!(nsec.types, vec![A, NS, SOA, TXT, AAAA, RRSIG, NSEC, DNSKEY]);
-
-            nsec.add_rtype(PTR);
             assert_eq!(
                 nsec.types,
-                vec![A, NS, SOA, PTR, TXT, AAAA, RRSIG, NSEC, DNSKEY]
+                BTreeSet::from([A, NS, SOA, TXT, AAAA, RRSIG, NSEC, DNSKEY])
             );
 
-            nsec.add_rtype(URI);
+            nsec.types.insert(PTR);
             assert_eq!(
                 nsec.types,
-                vec![A, NS, SOA, PTR, TXT, AAAA, RRSIG, NSEC, DNSKEY, URI]
+                BTreeSet::from([A, NS, SOA, PTR, TXT, AAAA, RRSIG, NSEC, DNSKEY])
+            );
+
+            nsec.types.insert(URI);
+            assert_eq!(
+                nsec.types,
+                BTreeSet::from([A, NS, SOA, PTR, TXT, AAAA, RRSIG, NSEC, DNSKEY, URI])
             )
         }
     }
@@ -1016,10 +1034,10 @@ mod tests {
         use ByteConvertible;
         use RecordType::*;
 
-        let nsec = super::NSEC {
-            next_domain_name: crate::FQDN::from("."),
-            types: vec![A, MX, RRSIG, NSEC, URI, CAA],
-        };
+        let nsec = super::Nsec::with_types(
+            crate::FQDN::from("."),
+            BTreeSet::from([A, MX, RRSIG, NSEC, URI, CAA]),
+        );
 
         assert_eq!(nsec.byte_size(), 12);
         assert_eq!(
@@ -1035,10 +1053,10 @@ mod tests {
         let pubkey_bytes = base64::engine::general_purpose::STANDARD
             .decode("AwEAAcNEU67LJI5GEgF9QLNqLO1SMq1EdoQ6E9f85ha0k0ewQGCblyW2836GiVsm6k8Kr5ECIoMJ6fZWf3CQSQ9ycWfTyOHfmI3eQ/1Covhb2y4bAmL/07PhrL7ozWBW3wBfM335Ft9xjtXHPy7ztCbV9qZ4TVDTW/Iyg0PiwgoXVesz")
             .expect("Failed to base64-decode the public key");
-        let mut dnskey = DNSKEY::new(rdata::dnssec::Algorithm::RSA_SHA256, pubkey_bytes);
-        dnskey.set_zone_key(true);
+        let mut dnskey = rdata::DnsKey::new(rdata::dnssec::Algorithm::RSA_SHA256, pubkey_bytes);
+        dnskey.zone_key = true;
 
-        let ds = DS::try_from_dnskey(
+        let ds = rdata::Ds::try_from_dnskey(
             &FQDN::new("miek.nl."),
             &dnskey,
             rdata::dnssec::DigestType::SHA1,
@@ -1061,15 +1079,16 @@ mod tests {
 
         // Create record for the RRset
         let set_name = FQDN::from("miek.nl");
-        let soa = RecordData::SOA {
-            mname: FQDN::from("open.nlnetlabs.nl"),
-            rname: FQDN::from("miekg.atoom.net"),
-            serial: 1293945905,
-            refresh: 14400,
-            retry: 3600,
-            expire: 604800,
-            minimum: 86400,
-        };
+        let soa = rdata::Soa::new(
+            FQDN::from("open.nlnetlabs.nl"),
+            FQDN::from("miekg.atoom.net"),
+            1293945905,
+            14400,
+            3600,
+            604800,
+            86400,
+        )
+        .into_record_data();
         let set = ResourceRecordSet::new(
             &set_name,
             RecordType::SOA,
@@ -1078,12 +1097,12 @@ mod tests {
             vec![&soa],
         );
 
-        let mut dnskey = DNSKEY::new(
+        let mut dnskey = rdata::DnsKey::new(
             rdata::dnssec::Algorithm::RSA_SHA1,
             base64_engine.decode("AwEAAb+8lGNCxJgLS8rYVer6EnHVuIkQDghdjdtewDzU3G5R7PbMbKVRvH2Ma7pQyYceoaqWZQirSj72euPWfPxQnMy9ucCylA+FuH9cSjIcPf4PqJfdupHk9X6EBYjxrCLY4p1/yBwgyBIRJtZtAqM3ceAH2WovEJD6rTtOuHo5AluJ")
             .unwrap()
         );
-        dnskey.set_zone_key(true);
+        dnskey.zone_key = true;
 
         assert_eq!(dnskey.base64_public_key(), "AwEAAb+8lGNCxJgLS8rYVer6EnHVuIkQDghdjdtewDzU3G5R7PbMbKVRvH2Ma7pQyYceoaqWZQirSj72euPWfPxQnMy9ucCylA+FuH9cSjIcPf4PqJfdupHk9X6EBYjxrCLY4p1/yBwgyBIRJtZtAqM3ceAH2WovEJD6rTtOuHo5AluJ");
 
@@ -1102,7 +1121,7 @@ mod tests {
             &rsa::BigUint::from(65537_u32)
         );
 
-        let rrsig = RRSIG::from_dnskey(
+        let rrsig = rdata::Rrsig::from_dnskey(
             &dnskey,
             &set,
             &(UNIX_EPOCH + Duration::from_millis(1293942305)),
@@ -1125,12 +1144,12 @@ mod tests {
         use std::time::{Duration, UNIX_EPOCH};
 
         let set_name = FQDN::from("miek.nl");
-        let srv = RecordData::SRV {
+        let srv = RecordData::SRV(rdata::Srv {
             priority: 1000,
             weight: 800,
             port: 0,
             target: FQDN::from("web1.miek.nl"),
-        };
+        });
         let set = ResourceRecordSet::new(
             &set_name,
             RecordType::SRV,
@@ -1152,13 +1171,13 @@ mod tests {
         )
         .unwrap();
 
-        let mut dnskey = DNSKEY::new(
+        let mut dnskey = rdata::DnsKey::new(
             rdata::dnssec::Algorithm::ECDSA_P384,
             key_pair.public_key().as_ref().to_vec(),
         );
-        dnskey.set_zone_key(true);
+        dnskey.zone_key = true;
 
-        let rrsig = RRSIG::from_dnskey(
+        let rrsig = rdata::Rrsig::from_dnskey(
             &dnskey,
             &set,
             &(UNIX_EPOCH + Duration::from_millis(1293942305)),
@@ -1177,12 +1196,12 @@ mod tests {
         use std::time::{Duration, UNIX_EPOCH};
 
         let set_name = FQDN::from("miek.nl");
-        let srv = RecordData::SRV {
+        let srv = RecordData::SRV(rdata::Srv {
             priority: 1000,
             weight: 800,
             port: 0,
             target: FQDN::from("web1.miek.nl"),
-        };
+        });
         let set = ResourceRecordSet::new(
             &set_name,
             RecordType::SRV,
@@ -1195,13 +1214,13 @@ mod tests {
         let pkcs8_bytes = ring::signature::Ed25519KeyPair::generate_pkcs8(&rng).unwrap();
         let key_pair = ring::signature::Ed25519KeyPair::from_pkcs8(pkcs8_bytes.as_ref()).unwrap();
 
-        let mut dnskey = DNSKEY::new(
+        let mut dnskey = rdata::DnsKey::new(
             rdata::dnssec::Algorithm::ED25519,
             key_pair.public_key().as_ref().to_vec(),
         );
-        dnskey.set_zone_key(true);
+        dnskey.zone_key = true;
 
-        let rrsig = RRSIG::from_dnskey(
+        let rrsig = rdata::Rrsig::from_dnskey(
             &dnskey,
             &set,
             &(UNIX_EPOCH + Duration::from_millis(1293942305)),
@@ -1220,12 +1239,12 @@ mod tests {
         use std::time::{Duration, UNIX_EPOCH};
 
         let set_name = FQDN::from("miek.nl");
-        let srv = RecordData::SRV {
+        let srv = RecordData::SRV(rdata::Srv {
             priority: 1000,
             weight: 800,
             port: 0,
             target: FQDN::from("web1.miek.nl"),
-        };
+        });
         let set = ResourceRecordSet::new(
             &set_name,
             RecordType::SRV,
@@ -1243,13 +1262,13 @@ mod tests {
         ])
         .expect("Failed to decode ed448 private key data from bytes");
 
-        let mut dnskey = DNSKEY::new(
+        let mut dnskey = rdata::DnsKey::new(
             rdata::dnssec::Algorithm::ED448,
             private_key.public_key.encode().to_vec(),
         );
-        dnskey.set_zone_key(true);
+        dnskey.zone_key = true;
 
-        let rrsig = RRSIG::from_dnskey(
+        let rrsig = rdata::Rrsig::from_dnskey(
             &dnskey,
             &set,
             &(UNIX_EPOCH + Duration::from_millis(1293942305)),

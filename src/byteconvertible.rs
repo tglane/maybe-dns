@@ -1,14 +1,20 @@
+use std::collections::HashMap;
+
 /// Trait to serialize/deserialize parts of DNS packets
 pub trait ByteConvertible {
+    /// Calculate the length of the binary buffer returned by `to_bytes`
     fn byte_size(&self) -> usize;
 
+    /// Create binary representation of the implementer
     fn to_bytes(&self) -> Vec<u8>;
 }
 
 pub trait CompressedByteConvertible {
-    fn to_bytes_compressed(
-        &self,
-        names: &mut std::collections::HashMap<u64, usize>,
-        offset: usize,
-    ) -> Vec<u8>;
+    /// Calculate the length of the binary buffer returned by `to_bytes_compressed`
+    fn byte_size_compressed(&self, names: &mut HashMap<u64, usize>, offset: usize) -> usize {
+        self.to_bytes_compressed(names, offset).len()
+    }
+
+    /// Create binary representation of the implementer that utilizes DNS compression
+    fn to_bytes_compressed(&self, names: &mut HashMap<u64, usize>, offset: usize) -> Vec<u8>;
 }

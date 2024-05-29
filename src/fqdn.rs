@@ -1,4 +1,6 @@
+use std::collections::HashMap;
 use std::convert::{From, TryFrom};
+use std::fmt::Display;
 
 use crate::buffer::DnsBuffer;
 use crate::byteconvertible::{ByteConvertible, CompressedByteConvertible};
@@ -23,23 +25,12 @@ impl FQDN {
         }
     }
 
-    pub fn to_string(&self) -> String {
-        let mut name = String::with_capacity(self.len());
-        for (idx, name_part) in self.iter().enumerate() {
-            // Safe because the u8 in self.data are parsed from a &str in the constructor
-            name.push_str(unsafe { std::str::from_utf8_unchecked(name_part) });
-            if idx + 1 != self.data.len() {
-                name.push('.');
-            }
-        }
-
-        name
+    pub fn is_empty(&self) -> bool {
+        self.byte_size() == 0
     }
 
     pub fn len(&self) -> usize {
-        self.iter().fold(0, |acc, name_part| {
-            acc + name_part.len() + if acc == 0 { 0 } else { 1 }
-        })
+        self.byte_size()
     }
 
     pub fn label_count(&self) -> u8 {
@@ -62,16 +53,29 @@ impl FQDN {
                 return tld == "local";
             }
         }
-        return false;
+        false
     }
 
     pub fn is_root(&self) -> bool {
         // Root simply means "" or "." as fully-qualified domain name
-        self.data.len() == 0 || self.data.iter().all(|sub| sub.len() == 0)
+        self.is_empty() || self.data.iter().all(|sub| sub.is_empty())
     }
 
     pub fn append_label(&mut self, name: &str) {
         self.data.push(name.as_bytes().to_vec());
+    }
+}
+
+impl Display for FQDN {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        for (idx, name_part) in self.iter().enumerate() {
+            // SAFETY: Safe because the u8 in self.data are parsed from a &str in the constructor
+            write!(f, "{}", unsafe { std::str::from_utf8_unchecked(name_part) })?;
+            if idx + 1 != self.data.len() {
+                write!(f, ".")?;
+            }
+        }
+        Ok(())
     }
 }
 
@@ -141,13 +145,18 @@ impl<'a> TryFrom<&mut DnsBuffer<'a>> for FQDN {
 }
 
 impl ByteConvertible for FQDN {
+    #[inline]
     fn byte_size(&self) -> usize {
         // Initial value is set to 1 to represent the mandatory termination byte '0' that is always
         // present even for empty FQDNs. For every non-empty label of the FQDN we add the number of
         // the labels characters and one extra byte to represent the length of the label to the
         // accumulator
         self.iter().fold(1, |acc, label| {
-            acc + if label.len() > 0 { 1 + label.len() } else { 0 }
+            acc + if !label.is_empty() {
+                1 + label.len()
+            } else {
+                0
+            }
         })
     }
 
@@ -156,7 +165,7 @@ impl ByteConvertible for FQDN {
         for name_part in self.iter() {
             if !name_part.is_empty() {
                 buffer.push(name_part.len() as u8);
-                buffer.extend_from_slice(&name_part);
+                buffer.extend_from_slice(name_part);
             }
         }
         buffer.push(0);
@@ -166,11 +175,28 @@ impl ByteConvertible for FQDN {
 }
 
 impl CompressedByteConvertible for FQDN {
-    fn to_bytes_compressed(
-        &self,
-        names: &mut std::collections::HashMap<u64, usize>,
-        mut offset: usize,
-    ) -> Vec<u8> {
+    fn byte_size_compressed(&self, names: &mut HashMap<u64, usize>, mut offset: usize) -> usize {
+        let mut size = 0;
+        for i in 0..self.data.len() {
+            let remaining_fqdn = &self.data[i..];
+            let remaining_hash = hash_fqdn(remaining_fqdn);
+
+            if let Some(_pointer) = names.get(&remaining_hash) {
+                // Found remaining match so we only add pointer length to the size
+                size += 2;
+                return size;
+            } else {
+                names.insert(remaining_hash, offset);
+                offset += self.data[i].len() + 1;
+                size += self.data[i].len() + 1;
+            }
+        }
+
+        // Add 0 delimiter to size
+        size + 1
+    }
+
+    fn to_bytes_compressed(&self, names: &mut HashMap<u64, usize>, mut offset: usize) -> Vec<u8> {
         let mut buffer = Vec::new();
 
         for i in 0..self.data.len() {
@@ -190,6 +216,7 @@ impl CompressedByteConvertible for FQDN {
             }
         }
 
+        // Add 0 delimiter to buffer
         buffer.push(0);
 
         buffer

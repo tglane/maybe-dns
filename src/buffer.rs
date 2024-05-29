@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::convert::From;
 
 use crate::error::DnsError;
@@ -13,26 +14,30 @@ pub struct DnsBuffer<'a> {
 }
 
 impl<'a> DnsBuffer<'a> {
-    pub fn sub(&mut self, len: usize) -> Result<DnsBuffer, DnsError> {
+    pub fn sub_buffer(&mut self, len: usize) -> Result<DnsBuffer, DnsError> {
         Ok(Self {
             data: &self.data[0..self.pos + len],
             pos: self.pos,
         })
     }
 
+    pub fn remaining(&self) -> usize {
+        self.data.len() - self.pos
+    }
+
     pub fn position(&self) -> usize {
         self.pos
     }
 
-    pub fn remaining(&self) -> usize {
-        self.data.len() - self.pos
+    pub fn set_position(&mut self, pos: usize) {
+        self.pos = pos;
     }
 
     pub fn advance(&mut self, len: usize) {
         self.pos += len;
     }
 
-    pub fn read_bytes(&self, len: usize) -> Result<&[u8], DnsError> {
+    pub fn peek_bytes(&self, len: usize) -> Result<&[u8], DnsError> {
         if self.pos + len > self.data.len() {
             return Err(DnsError::LengthViolation);
         }
@@ -60,11 +65,11 @@ impl<'a> DnsBuffer<'a> {
         Ok(u32::from_be_bytes(self.extract_bytes(4)?.try_into()?))
     }
 
-    pub fn extract_u16_as<TwoBytesType>(&mut self) -> Result<TwoBytesType, crate::error::DnsError>
+    pub fn extract_u16_as<TwoBytesType>(&mut self) -> Result<TwoBytesType, DnsError>
     where
         TwoBytesType: TryFrom<u16, Error = DnsError>,
     {
-        Ok(TwoBytesType::try_from(self.extract_u16()?)?)
+        TwoBytesType::try_from(self.extract_u16()?)
     }
 
     pub fn extract_character_string(&mut self) -> Result<Vec<u8>, DnsError> {
@@ -72,6 +77,12 @@ impl<'a> DnsBuffer<'a> {
         let mut data = Vec::with_capacity(len);
         data.extend_from_slice(self.extract_bytes(len)?);
         Ok(data)
+    }
+
+    pub fn extract_string(&mut self) -> Result<String, DnsError> {
+        let string = String::from_utf8(self.extract_character_string()?)
+            .map_err(|_| DnsError::LengthViolation)?;
+        Ok(string)
     }
 
     pub fn extract_fqdn(&mut self) -> Result<FQDN, DnsError> {
@@ -89,7 +100,7 @@ impl<'a> DnsBuffer<'a> {
                     org_pos = Some(self.pos + 1);
                 }
 
-                self.pos = (u16::from_be_bytes(self.read_bytes(2)?.try_into()?)
+                self.pos = (u16::from_be_bytes(self.peek_bytes(2)?.try_into()?)
                     & !COMPRESSION_MASK_U16) as usize;
 
                 if self.pos >= org_pos.unwrap_or(0) {
@@ -117,6 +128,10 @@ impl<'a> DnsBuffer<'a> {
         }
     }
 
+    pub fn generate_name_index(&self) -> HashMap<u64, usize> {
+        todo!("Iterate through buffer and find FQDN and insert their hashes into the result hashmap with their index in the buffer")
+    }
+
     pub fn as_slice(&self) -> &[u8] {
         self.data
     }
@@ -142,9 +157,9 @@ mod tests {
         let mut buffer = DnsBuffer::from(&ARR[..]);
 
         buffer.advance(2);
-        assert_eq!(buffer.read_bytes(3).unwrap_or(&[]), &ARR[2..5]);
+        assert_eq!(buffer.peek_bytes(3).unwrap_or(&[]), &ARR[2..5]);
         assert_eq!(buffer.extract_bytes(3).unwrap_or(&[]), &ARR[2..5]);
 
-        assert_eq!(buffer.read_bytes(4).unwrap_or(&[]), &ARR[5..9]);
+        assert_eq!(buffer.peek_bytes(4).unwrap_or(&[]), &ARR[5..9]);
     }
 }

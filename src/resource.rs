@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::convert::{From, Into, TryFrom, TryInto};
 use std::mem::size_of;
 
@@ -53,33 +54,49 @@ impl ByteConvertible for RecordClass {
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum RecordType {
-    A = 1,           // RFC 1035
-    NS = 2,          // RFC 1035
-    CNAME = 5,       // RFC 1035
-    SOA = 6,         // RFC 1035
-    NULL = 10,       // RFC 1035
-    WKS = 11,        // RFC 1035
-    PTR = 12,        // RFC 1035
-    HINFO = 13,      // RFC 1035
-    MINFO = 14,      // RFC 1035
-    MX = 15,         // RFC 1035
-    TXT = 16,        // RFC 1035
-    AAAA = 28,       // RFC 3596
-    LOC = 29,        // RFC 1876
-    SRV = 33,        // RFC 2782
-    NAPTR = 35,      // RFC 3404
-    OPT = 41,        // RFC 6891
-    DS = 43,         // RFC 4034
-    SSHFP = 44,      // RFC 4255
-    RRSIG = 46,      // RFC 4034
-    NSEC = 47,       // RFC 4034
-    DNSKEY = 48,     // RFC 4034
-    TLSA = 52,       // RFC 6698
+    A = 1,      // RFC 1035
+    NS = 2,     // RFC 1035
+    CNAME = 5,  // RFC 1035
+    SOA = 6,    // RFC 1035
+    NULL = 10,  // RFC 1035
+    WKS = 11,   // RFC 1035
+    PTR = 12,   // RFC 1035
+    HINFO = 13, // RFC 1035
+    MINFO = 14, // RFC 1035
+    MX = 15,    // RFC 1035
+    TXT = 16,   // RFC 1035
+    AAAA = 28,  // RFC 3596
+    LOC = 29,   // RFC 1876
+    SRV = 33,   // RFC 2782
+    NAPTR = 35, // RFC 3404
+    OPT = 41,   // RFC 6891
+    APL = 42,   // RFC 3123
+    #[cfg(feature = "dnssec")]
+    DS = 43, // RFC 4034
+    SSHFP = 44, // RFC 4255
+    IPSECKEY = 45, // RFC 4025
+    #[cfg(feature = "dnssec")]
+    RRSIG = 46, // RFC 4034
+    #[cfg(feature = "dnssec")]
+    NSEC = 47, // RFC 4034
+    #[cfg(feature = "dnssec")]
+    DNSKEY = 48, // RFC 4034
+    DHCID = 49, // RFC 4701
+    TLSA = 52,  // RFC 6698
+    HIP = 55,   // RFC 8005
+    #[cfg(feature = "dnssec")]
+    CDS = 59, // RFC 7344
+    #[cfg(feature = "dnssec")]
+    CDNSKEY = 60, // RFC 7344
     OPENPGPKEY = 61, // RFC 7929
-    EUI48 = 108,     // RFC 7043
-    EUI64 = 109,     // RFC 7043
-    URI = 256,       // RFC 7553
-    CAA = 257,       // RFC 8659
+    CSYNC = 62, // RFC 7477
+    SVCB = 64,  // RFC 9460
+    EUI48 = 108, // RFC 7043
+    EUI64 = 109, // RFC 7043
+    TKEY = 249, // RFC 2930
+    TSIG = 250, // RFC 8945
+    URI = 256,  // RFC 7553
+    CAA = 257,  // RFC 8659
 }
 
 impl RecordType {
@@ -101,15 +118,31 @@ impl RecordType {
             Self::SRV => true,
             Self::NAPTR => true,
             Self::OPT => false,
+            Self::APL => false,
+            #[cfg(feature = "dnssec")]
             Self::DS => false,
             Self::SSHFP => false,
+            Self::IPSECKEY => false,
+            #[cfg(feature = "dnssec")]
             Self::RRSIG => false,
+            #[cfg(feature = "dnssec")]
             Self::NSEC => true,
+            #[cfg(feature = "dnssec")]
             Self::DNSKEY => false,
+            Self::DHCID => false,
             Self::TLSA => false,
+            Self::HIP => false,
+            #[cfg(feature = "dnssec")]
+            Self::CDS => false,
+            #[cfg(feature = "dnssec")]
+            Self::CDNSKEY => false,
             Self::OPENPGPKEY => false,
+            Self::CSYNC => false,
+            Self::SVCB => false,
             Self::EUI48 => false,
             Self::EUI64 => false,
+            Self::TKEY => false,
+            Self::TSIG => false,
             Self::URI => false,
             Self::CAA => false,
         }
@@ -137,15 +170,27 @@ impl TryFrom<u16> for RecordType {
             33 => Ok(Self::SRV),
             35 => Ok(Self::NAPTR),
             41 => Ok(Self::OPT),
+            42 => Ok(Self::APL),
+            #[cfg(feature = "dnssec")]
             43 => Ok(Self::DS),
             44 => Ok(Self::SSHFP),
+            45 => Ok(Self::IPSECKEY),
+            #[cfg(feature = "dnssec")]
             46 => Ok(Self::RRSIG),
+            #[cfg(feature = "dnssec")]
             47 => Ok(Self::NSEC),
+            #[cfg(feature = "dnssec")]
             48 => Ok(Self::DNSKEY),
+            49 => Ok(Self::DHCID),
             52 => Ok(Self::TLSA),
+            55 => Ok(Self::HIP),
             61 => Ok(Self::OPENPGPKEY),
+            62 => Ok(Self::CSYNC),
+            64 => Ok(Self::SVCB),
             108 => Ok(Self::EUI48),
             109 => Ok(Self::EUI64),
+            249 => Ok(Self::TKEY),
+            250 => Ok(Self::TSIG),
             256 => Ok(Self::URI),
             257 => Ok(Self::CAA),
             _ => Err(DnsError::InvalidType(number)),
@@ -172,15 +217,31 @@ impl From<RecordType> for u16 {
             RecordType::SRV => 33,
             RecordType::NAPTR => 35,
             RecordType::OPT => 41,
+            RecordType::APL => 42,
+            #[cfg(feature = "dnssec")]
             RecordType::DS => 43,
             RecordType::SSHFP => 44,
+            RecordType::IPSECKEY => 45,
+            #[cfg(feature = "dnssec")]
             RecordType::RRSIG => 46,
+            #[cfg(feature = "dnssec")]
             RecordType::NSEC => 47,
+            #[cfg(feature = "dnssec")]
             RecordType::DNSKEY => 48,
+            RecordType::DHCID => 49,
             RecordType::TLSA => 52,
+            RecordType::HIP => 55,
+            #[cfg(feature = "dnssec")]
+            RecordType::CDS => 59,
+            #[cfg(feature = "dnssec")]
+            RecordType::CDNSKEY => 60,
             RecordType::OPENPGPKEY => 61,
+            RecordType::CSYNC => 62,
+            RecordType::SVCB => 64,
             RecordType::EUI48 => 108,
             RecordType::EUI64 => 109,
+            RecordType::TKEY => 249,
+            RecordType::TSIG => 250,
             RecordType::URI => 256,
             RecordType::CAA => 257,
         }
@@ -308,8 +369,8 @@ impl<'a> TryFrom<&mut DnsBuffer<'a>> for ResourceRecord {
 
         let data_len = buffer.extract_u16()?;
 
-        let mut sub_buffer = buffer.sub(data_len as usize)?;
-        let rdata = RecordData::from(a_type, &mut sub_buffer)?;
+        let mut rdata_buffer = buffer.sub_buffer(data_len as usize)?;
+        let rdata = RecordData::from(a_type, &mut rdata_buffer)?;
 
         buffer.advance(data_len as usize);
 
@@ -364,11 +425,16 @@ impl ByteConvertible for ResourceRecord {
 }
 
 impl CompressedByteConvertible for ResourceRecord {
-    fn to_bytes_compressed(
-        &self,
-        names: &mut std::collections::HashMap<u64, usize>,
-        offset: usize,
-    ) -> Vec<u8> {
+    fn byte_size_compressed(&self, names: &mut HashMap<u64, usize>, offset: usize) -> usize {
+        self.a_name.byte_size_compressed(names, offset)
+            + size_of::<u16>()
+            + size_of::<u16>()
+            + size_of::<u32>()
+            + size_of::<u16>()
+            + self.rdata.byte_size_compressed(names, offset)
+    }
+
+    fn to_bytes_compressed(&self, names: &mut HashMap<u64, usize>, offset: usize) -> Vec<u8> {
         let mut buffer = Vec::new();
 
         buffer.extend_from_slice(&self.a_name.to_bytes_compressed(names, offset));

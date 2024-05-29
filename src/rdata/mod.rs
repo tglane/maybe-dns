@@ -1,247 +1,216 @@
+mod a;
+mod aaaa;
+mod apl;
+mod caa;
+mod cname;
+mod csync;
+pub mod dhcid;
+#[cfg(feature = "dnssec")]
 mod dnssec;
+mod eui48;
+mod eui64;
+mod hinfo;
+mod hip;
+pub mod ipseckey;
+mod loc;
+mod minfo;
+mod mx;
+pub mod naptr;
+mod ns;
+mod null;
+mod openpgpkey;
+mod opt;
+mod ptr;
+mod soa;
+mod srv;
+pub mod sshfp;
+mod svcb;
+pub mod tkey;
+pub mod tlsa;
+pub mod tsig;
+mod txt;
+mod uri;
+mod wks;
 
-pub use self::dnssec::{DNSKEY, DS, NSEC, RRSIG};
-
-use std::collections::HashMap;
-use std::convert::{From, TryFrom, TryInto};
-use std::net::{Ipv4Addr, Ipv6Addr};
+use std::convert::TryFrom;
 
 use crate::buffer::DnsBuffer;
 use crate::byteconvertible::{ByteConvertible, CompressedByteConvertible};
 use crate::error::DnsError;
-use crate::fqdn::FQDN;
 use crate::resource::RecordType;
 
-// #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub use self::a::A;
+pub use self::aaaa::Aaaa;
+pub use self::apl::Apl;
+pub use self::caa::Caa;
+pub use self::cname::Cname;
+pub use self::csync::Csync;
+pub use self::dhcid::Dhcid;
+#[cfg(feature = "dnssec")]
+pub use self::dnssec::{DnsKey, Ds, Nsec, Rrsig};
+pub use self::eui48::Eui48;
+pub use self::eui64::Eui64;
+pub use self::hinfo::Hinfo;
+pub use self::hip::Hip;
+pub use self::ipseckey::IpSecKey;
+pub use self::loc::Loc;
+pub use self::minfo::Minfo;
+pub use self::mx::Mx;
+pub use self::naptr::Naptr;
+pub use self::ns::Ns;
+pub use self::null::Null;
+pub use self::openpgpkey::OpenPgpKey;
+pub use self::opt::Opt;
+pub use self::ptr::Ptr;
+pub use self::soa::Soa;
+pub use self::srv::Srv;
+pub use self::sshfp::Sshfp;
+pub use self::svcb::Svcb;
+pub use self::tkey::Tkey;
+pub use self::tlsa::Tlsa;
+pub use self::tsig::Tsig;
+pub use self::txt::Txt;
+pub use self::uri::Uri;
+pub use self::wks::Wks;
+
+pub trait RData {
+    fn record_type(&self) -> RecordType;
+
+    fn into_record_data(self) -> RecordData;
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Algorithm {
+    Reserved,
+    RSA,
+    DSA,
+    ECDSA,
+    Ed25519,
+    Ed448,
+}
+
+impl TryFrom<u8> for Algorithm {
+    type Error = DnsError;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(Self::Reserved),
+            1 => Ok(Self::RSA),
+            2 => Ok(Self::DSA),
+            3 => Ok(Self::ECDSA),
+            4 => Ok(Self::Ed25519),
+            5 => Ok(Self::Ed448),
+            _ => Err(DnsError::InvalidSSHFPAlgorithm(value)),
+        }
+    }
+}
+
+impl From<Algorithm> for u8 {
+    fn from(algorithm: Algorithm) -> Self {
+        match algorithm {
+            Algorithm::Reserved => 0,
+            Algorithm::RSA => 1,
+            Algorithm::DSA => 2,
+            Algorithm::ECDSA => 3,
+            Algorithm::Ed25519 => 4,
+            Algorithm::Ed448 => 5,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RecordData {
-    A(Ipv4Addr),
-    NS(FQDN),
-    CNAME(FQDN),
-    SOA {
-        mname: FQDN,
-        rname: FQDN,
-        serial: u32,
-        refresh: u32,
-        retry: u32,
-        expire: u32,
-        minimum: u32,
-    },
-    NULL(Vec<u8>),
-    WKS {
-        address: u32,
-        protocol: u8,
-        bitmap: Vec<u8>,
-    },
-    PTR(FQDN),
-    HINFO {
-        cpu: Vec<u8>,
-        os: Vec<u8>,
-    },
-    MINFO {
-        rmailbx: FQDN,
-        emailbx: FQDN,
-    },
-    MX {
-        preference: u16,
-        exchange: FQDN,
-    },
-    TXT(Vec<String>),
-    AAAA(Ipv6Addr),
-    LOC {
-        version: u8,
-        size: u8,
-        horiz_pre: u8,
-        vert_pre: u8,
-        latitude: u32,
-        longitude: u32,
-        altitude: u32,
-    },
-    SRV {
-        priority: u16,
-        weight: u16,
-        port: u16,
-        target: FQDN,
-    },
-    NAPTR {
-        order: u16,
-        preference: u16,
-        flags: Vec<u8>,
-        services: Vec<u8>,
-        regexp: Vec<u8>,
-        replacement: FQDN,
-    },
-    OPT(HashMap<u16, Vec<u8>>),
-    DS(DS),
-    SSHFP {
-        algorithm: SSHFPAlgorithm,
-        fingerprint_type: SSHFPFingerprintType,
-        fingerprint: Vec<u8>,
-    },
-    RRSIG(RRSIG),
-    NSEC(NSEC),
-    DNSKKEY(DNSKEY),
-    TLSA {
-        cert_usage: u8,
-        selector: TLSASelector,
-        matching_type: TLSAMatchingType,
-        associated_data: Vec<u8>,
-    },
-    OPENPGPKEY(Vec<u8>),
-    EUI48([u8; 6]),
-    EUI64([u8; 8]),
-    URI {
-        priority: u16,
-        weight: u16,
-        target: Vec<u8>,
-    },
-    CAA {
-        issuer_critical_flag: bool,
-        tag: String,
-        value: Vec<u8>,
-    },
+    A(A),
+    NS(Ns),
+    CNAME(Cname),
+    SOA(Soa),
+    NULL(Null),
+    WKS(Wks),
+    PTR(Ptr),
+    HINFO(Hinfo),
+    MINFO(Minfo),
+    MX(Mx),
+    TXT(Txt),
+    AAAA(Aaaa),
+    LOC(Loc),
+    SRV(Srv),
+    NAPTR(Naptr),
+    OPT(Opt),
+    APL(Apl),
+    #[cfg(feature = "dnssec")]
+    DS(Ds),
+    SSHFP(Sshfp),
+    IPSECKEY(IpSecKey),
+    #[cfg(feature = "dnssec")]
+    RRSIG(Rrsig),
+    #[cfg(feature = "dnssec")]
+    NSEC(Nsec),
+    #[cfg(feature = "dnssec")]
+    DNSKEY(DnsKey),
+    DHCID(Dhcid),
+    TLSA(Tlsa),
+    HIP(Hip),
+    #[cfg(feature = "dnssec")]
+    CDS(Ds),
+    #[cfg(feature = "dnssec")]
+    CDNSKEY(DnsKey),
+    OPENPGPKEY(OpenPgpKey),
+    CSYNC(Csync),
+    SVCB(Svcb),
+    EUI48(Eui48),
+    EUI64(Eui64),
+    TKEY(Tkey),
+    TSIG(Tsig),
+    URI(Uri),
+    CAA(Caa),
 }
 
 impl RecordData {
     pub fn from(rec_type: RecordType, buffer: &mut DnsBuffer) -> Result<Self, DnsError> {
         Ok(match rec_type {
-            RecordType::A => Self::A(Ipv4Addr::from(buffer.extract_u32()?)),
-            RecordType::NS => Self::NS(buffer.extract_fqdn()?),
-            RecordType::CNAME => Self::CNAME(buffer.extract_fqdn()?),
-            RecordType::SOA => Self::SOA {
-                mname: FQDN::try_from(buffer as &mut _)?,
-                rname: FQDN::try_from(buffer as &mut _)?,
-                serial: buffer.extract_u32()?,
-                refresh: buffer.extract_u32()?,
-                retry: buffer.extract_u32()?,
-                expire: buffer.extract_u32()?,
-                minimum: buffer.extract_u32()?,
-            },
-            RecordType::NULL => Self::NULL(buffer.extract_bytes(buffer.remaining())?.to_vec()),
-            RecordType::WKS => {
-                let address = buffer.extract_u32()?;
-                let protocol = buffer.extract_u8()?;
-                let bitmap = buffer.extract_bytes(buffer.remaining())?.to_vec();
-                Self::WKS {
-                    address,
-                    protocol,
-                    bitmap,
-                }
-            }
-            RecordType::PTR => Self::PTR(FQDN::try_from(buffer)?),
-            RecordType::HINFO => Self::HINFO {
-                cpu: buffer.extract_character_string()?,
-                os: buffer.extract_character_string()?,
-            },
-            RecordType::MINFO => Self::MINFO {
-                rmailbx: buffer.extract_fqdn()?,
-                emailbx: buffer.extract_fqdn()?,
-            },
-            RecordType::MX => {
-                let preference = buffer.extract_u16()?;
-                let exchange = buffer.extract_fqdn()?;
-                Self::MX {
-                    preference,
-                    exchange,
-                }
-            }
-            RecordType::TXT => {
-                let mut txt_store = Vec::<String>::new();
-                while buffer.remaining() > 0 {
-                    let txt_size = buffer.extract_u8()?;
-                    txt_store.push(
-                        String::from_utf8_lossy(buffer.extract_bytes(txt_size as usize)?)
-                            .to_string(),
-                    );
-                }
-                Self::TXT(txt_store)
-            }
-            RecordType::AAAA => Self::AAAA(Ipv6Addr::from(u128::from_be_bytes(
-                buffer.extract_bytes(16)?.try_into()?,
-            ))),
-            RecordType::LOC => Self::LOC {
-                version: buffer.extract_u8()?,
-                size: buffer.extract_u8()?,
-                horiz_pre: buffer.extract_u8()?,
-                vert_pre: buffer.extract_u8()?,
-                latitude: buffer.extract_u32()?,
-                longitude: buffer.extract_u32()?,
-                altitude: buffer.extract_u32()?,
-            },
-            RecordType::SRV => {
-                let priority = buffer.extract_u16()?;
-                let weight = buffer.extract_u16()?;
-                let port = buffer.extract_u16()?;
-                let target = buffer.extract_fqdn()?;
-                Self::SRV {
-                    priority,
-                    weight,
-                    port,
-                    target,
-                }
-            }
-            RecordType::NAPTR => Self::NAPTR {
-                order: buffer.extract_u16()?,
-                preference: buffer.extract_u16()?,
-                flags: buffer.extract_character_string()?,
-                services: buffer.extract_character_string()?,
-                regexp: buffer.extract_character_string()?,
-                replacement: buffer.extract_fqdn()?,
-            },
-            RecordType::OPT => {
-                let mut kv_data = HashMap::new();
-                while buffer.remaining() > 0 {
-                    let opt_code = buffer.extract_u16()?;
-                    let opt_data_len = buffer.extract_u16()?;
-                    let opt_data = buffer.extract_bytes(opt_data_len as usize)?;
-
-                    kv_data.insert(opt_code, opt_data.to_vec());
-                }
-                Self::OPT(kv_data)
-            }
-            RecordType::DS => Self::DS(DS::try_from(buffer)?),
-            RecordType::SSHFP => Self::SSHFP {
-                algorithm: buffer.extract_u8()?.try_into()?,
-                fingerprint_type: buffer.extract_u8()?.try_into()?,
-                fingerprint: buffer.extract_bytes(buffer.remaining())?.to_vec(),
-            },
-            RecordType::RRSIG => Self::RRSIG(RRSIG::try_from(buffer)?),
-            RecordType::NSEC => Self::NSEC(NSEC::try_from(buffer)?),
-            RecordType::DNSKEY => Self::DNSKKEY(DNSKEY::try_from(buffer)?),
-            RecordType::TLSA => Self::TLSA {
-                cert_usage: buffer.extract_u8()?,
-                selector: buffer.extract_u8()?.try_into()?,
-                matching_type: buffer.extract_u8()?.try_into()?,
-                associated_data: buffer.extract_bytes(buffer.remaining())?.to_vec(),
-            },
-            RecordType::OPENPGPKEY => {
-                Self::OPENPGPKEY(buffer.extract_bytes(buffer.remaining())?.to_vec())
-            }
-            RecordType::EUI48 => Self::EUI48(buffer.extract_bytes(6)?.try_into()?),
-            RecordType::EUI64 => Self::EUI64(buffer.extract_bytes(8)?.try_into()?),
-            RecordType::URI => Self::URI {
-                priority: buffer.extract_u16()?,
-                weight: buffer.extract_u16()?,
-                target: buffer.extract_bytes(buffer.remaining())?.to_vec(),
-            },
-            RecordType::CAA => {
-                let flags = buffer.extract_u8()?;
-                let tag_len = buffer.extract_u8()?;
-
-                if tag_len == 0 {
-                    return Err(DnsError::InvalidPacketData);
-                }
-
-                let tag =
-                    String::from_utf8_lossy(buffer.extract_bytes(tag_len as usize)?).to_string();
-                let value = buffer.extract_bytes(buffer.remaining())?.to_vec();
-
-                Self::CAA {
-                    issuer_critical_flag: (flags & 0b10000000) != 0,
-                    tag,
-                    value,
-                }
-            }
+            RecordType::A => Self::A(A::try_from(buffer)?),
+            RecordType::NS => Self::NS(Ns::try_from(buffer)?),
+            RecordType::CNAME => Self::CNAME(Cname::try_from(buffer)?),
+            RecordType::SOA => Self::SOA(Soa::try_from(buffer)?),
+            RecordType::NULL => Self::NULL(Null::try_from(buffer)?),
+            RecordType::WKS => Self::WKS(Wks::try_from(buffer)?),
+            RecordType::PTR => Self::PTR(Ptr::try_from(buffer)?),
+            RecordType::HINFO => Self::HINFO(Hinfo::try_from(buffer)?),
+            RecordType::MINFO => Self::MINFO(Minfo::try_from(buffer)?),
+            RecordType::MX => Self::MX(Mx::try_from(buffer)?),
+            RecordType::TXT => Self::TXT(Txt::try_from(buffer)?),
+            RecordType::AAAA => Self::AAAA(Aaaa::try_from(buffer)?),
+            RecordType::LOC => Self::LOC(Loc::try_from(buffer)?),
+            RecordType::SRV => Self::SRV(Srv::try_from(buffer)?),
+            RecordType::NAPTR => Self::NAPTR(Naptr::try_from(buffer)?),
+            RecordType::OPT => Self::OPT(Opt::try_from(buffer)?),
+            RecordType::APL => Self::APL(Apl::try_from(buffer)?),
+            #[cfg(feature = "dnssec")]
+            RecordType::DS => Self::DS(Ds::try_from(buffer)?),
+            RecordType::SSHFP => Self::SSHFP(Sshfp::try_from(buffer)?),
+            RecordType::IPSECKEY => Self::IPSECKEY(IpSecKey::try_from(buffer)?),
+            #[cfg(feature = "dnssec")]
+            RecordType::RRSIG => Self::RRSIG(Rrsig::try_from(buffer)?),
+            #[cfg(feature = "dnssec")]
+            RecordType::NSEC => Self::NSEC(Nsec::try_from(buffer)?),
+            #[cfg(feature = "dnssec")]
+            RecordType::DNSKEY => Self::DNSKEY(DnsKey::try_from(buffer)?),
+            RecordType::DHCID => Self::DHCID(Dhcid::try_from(buffer)?),
+            RecordType::TLSA => Self::TLSA(Tlsa::try_from(buffer)?),
+            RecordType::HIP => Self::HIP(Hip::try_from(buffer)?),
+            #[cfg(feature = "dnssec")]
+            RecordType::CDS => Self::CDS(Ds::try_from(buffer)?),
+            #[cfg(feature = "dnssec")]
+            RecordType::CDNSKEY => Self::CDNSKEY(DnsKey::try_from(buffer)?),
+            RecordType::OPENPGPKEY => Self::OPENPGPKEY(OpenPgpKey::try_from(buffer)?),
+            RecordType::CSYNC => Self::CSYNC(Csync::try_from(buffer)?),
+            RecordType::SVCB => Self::SVCB(Svcb::try_from(buffer)?),
+            RecordType::EUI48 => Self::EUI48(Eui48::try_from(buffer)?),
+            RecordType::EUI64 => Self::EUI64(Eui64::try_from(buffer)?),
+            RecordType::TKEY => Self::TKEY(Tkey::try_from(buffer)?),
+            RecordType::TSIG => Self::TSIG(Tsig::try_from(buffer)?),
+            RecordType::URI => Self::URI(Uri::try_from(buffer)?),
+            RecordType::CAA => Self::CAA(Caa::try_from(buffer)?),
         })
     }
 }
@@ -249,278 +218,97 @@ impl RecordData {
 impl ByteConvertible for RecordData {
     fn byte_size(&self) -> usize {
         match self {
-            Self::A(_) => 4,
+            Self::A(ref a) => a.byte_size(),
             Self::NS(ref name) => name.byte_size(),
             Self::CNAME(ref name) => name.byte_size(),
-            Self::SOA {
-                ref mname,
-                ref rname,
-                serial: _,
-                refresh: _,
-                retry: _,
-                expire: _,
-                minimum: _,
-            } => mname.len() + 2 + rname.len() + 2 + 4 + 4 + 4 + 4 + 4,
-            Self::NULL(ref buffer) => buffer.len(),
-            Self::WKS {
-                address: _,
-                protocol: _,
-                ref bitmap,
-            } => 4 + 1 + bitmap.len(),
-            Self::PTR(ref name) => name.byte_size(),
-            Self::HINFO { ref cpu, ref os } => 2 + cpu.len() + os.len(),
-            Self::MINFO {
-                ref rmailbx,
-                ref emailbx,
-            } => rmailbx.len() + 2 + emailbx.len() + 2,
-            Self::MX {
-                preference: _,
-                ref exchange,
-            } => 2 + exchange.len() + 2,
-            Self::TXT(ref store) => store.iter().fold(0, |acc, elem| acc + elem.len() + 1),
-            Self::AAAA(_) => 16,
-            Self::LOC {
-                version: _,
-                size: _,
-                horiz_pre: _,
-                vert_pre: _,
-                latitude: _,
-                longitude: _,
-                altitude: _,
-            } => 16,
-            Self::SRV {
-                priority: _,
-                weight: _,
-                port: _,
-                ref target,
-            } => 2 + 2 + 2 + target.len() + 2,
-            Self::NAPTR {
-                order: _,
-                preference: _,
-                ref flags,
-                ref services,
-                ref regexp,
-                ref replacement,
-            } => {
-                2 + 2 + flags.len() + 1 + services.len() + 1 + regexp.len() + 1 + replacement.len()
-            }
-            Self::OPT(kv_data) => 2 + 2 + kv_data.iter().fold(0, |acc, elem| acc + elem.1.len()),
-            Self::DS(ds) => ds.byte_size(),
-            Self::SSHFP {
-                algorithm: _,
-                fingerprint_type: _,
-                ref fingerprint,
-            } => 1 + 1 + fingerprint.len(),
-            Self::RRSIG(rrsig) => rrsig.byte_size(),
-            Self::NSEC(nsec) => nsec.byte_size(),
-            Self::DNSKKEY(dnskey) => dnskey.byte_size(),
-            Self::TLSA {
-                cert_usage: _,
-                selector: _,
-                matching_type: _,
-                ref associated_data,
-            } => 3 + associated_data.len(),
-            Self::OPENPGPKEY(data) => data.len(),
-            Self::EUI48(_) => 6,
-            Self::EUI64(_) => 8,
-            Self::URI {
-                priority: _,
-                weight: _,
-                ref target,
-            } => 2 + 2 + target.len(),
-            Self::CAA {
-                issuer_critical_flag: _,
-                ref tag,
-                ref value,
-            } => 2 + tag.len() + value.len(),
+            Self::SOA(ref soa) => soa.byte_size(),
+            Self::NULL(ref null) => null.byte_size(),
+            Self::WKS(ref wks) => wks.byte_size(),
+            Self::PTR(ref ptr) => ptr.byte_size(),
+            Self::HINFO(ref hinfo) => hinfo.byte_size(),
+            Self::MINFO(ref minfo) => minfo.byte_size(),
+            Self::MX(ref mx) => mx.byte_size(),
+            Self::TXT(ref txt) => txt.byte_size(),
+            Self::AAAA(ref aaaa) => aaaa.byte_size(),
+            Self::LOC(ref loc) => loc.byte_size(),
+            Self::SRV(ref srv) => srv.byte_size(),
+            Self::NAPTR(ref naptr) => naptr.byte_size(),
+            Self::OPT(ref opt) => opt.byte_size(),
+            Self::APL(ref apl) => apl.byte_size(),
+            #[cfg(feature = "dnssec")]
+            Self::DS(ref ds) => ds.byte_size(),
+            Self::SSHFP(ref sshfp) => sshfp.byte_size(),
+            Self::IPSECKEY(ref ipseckey) => ipseckey.byte_size(),
+            #[cfg(feature = "dnssec")]
+            Self::RRSIG(ref rrsig) => rrsig.byte_size(),
+            #[cfg(feature = "dnssec")]
+            Self::NSEC(ref nsec) => nsec.byte_size(),
+            #[cfg(feature = "dnssec")]
+            Self::DNSKEY(ref dnskey) => dnskey.byte_size(),
+            Self::DHCID(ref dhcid) => dhcid.byte_size(),
+            Self::TLSA(ref tlsa) => tlsa.byte_size(),
+            Self::HIP(ref hip) => hip.byte_size(),
+            #[cfg(feature = "dnssec")]
+            Self::CDS(ref ds) => ds.byte_size(),
+            #[cfg(feature = "dnssec")]
+            Self::CDNSKEY(ref dnskey) => dnskey.byte_size(),
+            Self::OPENPGPKEY(ref openpgpkey) => openpgpkey.byte_size(),
+            Self::CSYNC(ref csync) => csync.byte_size(),
+            Self::SVCB(ref svcb) => svcb.byte_size(),
+            Self::EUI48(ref eui) => eui.byte_size(),
+            Self::EUI64(ref eui) => eui.byte_size(),
+            Self::TKEY(ref tkey) => tkey.byte_size(),
+            Self::TSIG(ref tsig) => tsig.byte_size(),
+            Self::URI(ref uri) => uri.byte_size(),
+            Self::CAA(ref caa) => caa.byte_size(),
         }
     }
 
     fn to_bytes(&self) -> Vec<u8> {
         match self {
-            Self::A(ref buffer) => buffer.octets().to_vec(),
+            Self::A(ref a) => a.to_bytes(),
             Self::NS(ref name) => name.to_bytes(),
             Self::CNAME(ref name) => name.to_bytes(),
-            Self::SOA {
-                ref mname,
-                ref rname,
-                ref serial,
-                ref refresh,
-                ref retry,
-                ref expire,
-                ref minimum,
-            } => {
-                let mut buffer = Vec::with_capacity(mname.byte_size() + rname.byte_size() + 64);
-                buffer.extend_from_slice(&mname.to_bytes());
-                buffer.extend_from_slice(&rname.to_bytes());
-                buffer.extend_from_slice(&u32::to_be_bytes(*serial));
-                buffer.extend_from_slice(&u32::to_be_bytes(*refresh));
-                buffer.extend_from_slice(&u32::to_be_bytes(*retry));
-                buffer.extend_from_slice(&u32::to_be_bytes(*expire));
-                buffer.extend_from_slice(&u32::to_be_bytes(*minimum));
-                buffer
-            }
-            Self::NULL(ref buffer) => buffer.clone(),
-            Self::WKS {
-                ref address,
-                ref protocol,
-                ref bitmap,
-            } => {
-                let mut buffer = Vec::with_capacity(4 + 1 + bitmap.len());
-                buffer.extend_from_slice(&u32::to_be_bytes(*address));
-                buffer.extend_from_slice(&u8::to_be_bytes(*protocol));
-                buffer.extend_from_slice(&bitmap);
-                buffer
-            }
-            Self::PTR(ref name) => name.to_bytes(),
-            Self::HINFO { ref cpu, ref os } => {
-                let mut buffer = Vec::with_capacity(2 + cpu.len() + os.len());
-                buffer.push(cpu.len() as u8);
-                buffer.extend_from_slice(&cpu);
-                buffer.push(os.len() as u8);
-                buffer.extend_from_slice(&os);
-                buffer
-            }
-            Self::MINFO {
-                ref rmailbx,
-                ref emailbx,
-            } => {
-                let mut buffer = Vec::with_capacity(rmailbx.byte_size() + emailbx.byte_size());
-                buffer.extend_from_slice(&rmailbx.to_bytes());
-                buffer.extend_from_slice(&emailbx.to_bytes());
-                buffer
-            }
-            Self::MX {
-                ref preference,
-                ref exchange,
-            } => {
-                let mut buffer = Vec::with_capacity(exchange.byte_size() + 2);
-                buffer.extend_from_slice(&u16::to_be_bytes(*preference));
-                buffer.extend_from_slice(&exchange.to_bytes());
-                buffer
-            }
-            Self::TXT(ref store) => store.iter().fold(Vec::new(), |mut buff, elem| {
-                let txt_bin = elem.as_bytes();
-                buff.push(txt_bin.len() as u8);
-                buff.extend_from_slice(txt_bin);
-                buff
-            }),
-            Self::AAAA(ref buffer) => buffer.octets().to_vec(),
-            Self::LOC {
-                ref version,
-                ref size,
-                ref horiz_pre,
-                ref vert_pre,
-                ref latitude,
-                ref longitude,
-                ref altitude,
-            } => {
-                let mut buffer = Vec::with_capacity(16);
-                buffer.push(*version);
-                buffer.push(*size);
-                buffer.push(*horiz_pre);
-                buffer.push(*vert_pre);
-                buffer.extend_from_slice(&u32::to_be_bytes(*latitude));
-                buffer.extend_from_slice(&u32::to_be_bytes(*longitude));
-                buffer.extend_from_slice(&u32::to_be_bytes(*altitude));
-                buffer
-            }
-            Self::SRV {
-                ref priority,
-                ref weight,
-                ref port,
-                ref target,
-            } => {
-                let mut buff = Vec::with_capacity(6 + target.byte_size());
-                buff.extend_from_slice(&u16::to_be_bytes(*priority));
-                buff.extend_from_slice(&u16::to_be_bytes(*weight));
-                buff.extend_from_slice(&u16::to_be_bytes(*port));
-                buff.extend_from_slice(&target.to_bytes());
-                buff
-            }
-            Self::NAPTR {
-                order,
-                preference,
-                ref flags,
-                ref services,
-                ref regexp,
-                ref replacement,
-            } => {
-                let mut buff = Vec::with_capacity(self.byte_size());
-                buff.extend_from_slice(&u16::to_be_bytes(*order));
-                buff.extend_from_slice(&u16::to_be_bytes(*preference));
-                buff.push(flags.len() as u8);
-                buff.extend_from_slice(&flags);
-                buff.push(services.len() as u8);
-                buff.extend_from_slice(&services);
-                buff.push(regexp.len() as u8);
-                buff.extend_from_slice(&regexp);
-                buff.extend_from_slice(&replacement.to_bytes());
-                buff
-            }
-            Self::OPT(kv_data) => {
-                let mut buff = Vec::with_capacity(self.byte_size());
-                for (code, data) in kv_data.iter() {
-                    buff.extend_from_slice(&u16::to_be_bytes(*code));
-                    buff.extend_from_slice(&u16::to_be_bytes(data.len() as u16));
-                    buff.extend_from_slice(&data);
-                }
-                buff
-            }
-            Self::DS(ds) => ds.to_bytes(),
-            Self::SSHFP {
-                algorithm,
-                fingerprint_type,
-                ref fingerprint,
-            } => {
-                let mut buff = Vec::<u8>::with_capacity(2 + fingerprint.len());
-                buff.push((*algorithm).into());
-                buff.push((*fingerprint_type).into());
-                buff.extend_from_slice(fingerprint);
-                buff
-            }
-            Self::RRSIG(rrsig) => rrsig.to_bytes(),
-            Self::NSEC(nsec) => nsec.to_bytes(),
-            Self::DNSKKEY(dnskey) => dnskey.to_bytes(),
-            Self::TLSA {
-                cert_usage,
-                selector,
-                matching_type,
-                ref associated_data,
-            } => {
-                let mut buff = Vec::with_capacity(3 + associated_data.len());
-                buff.push((*cert_usage).into());
-                buff.push((*selector).into());
-                buff.push((*matching_type).into());
-                buff.extend_from_slice(associated_data);
-                buff
-            }
-            Self::OPENPGPKEY(data) => data.clone(),
-            Self::EUI48(octets) => octets.to_vec(),
-            Self::EUI64(octets) => octets.to_vec(),
-            Self::URI {
-                priority,
-                weight,
-                ref target,
-            } => {
-                let mut buff = Vec::with_capacity(2 + 2 + target.len());
-                buff.extend_from_slice(&u16::to_be_bytes(*priority));
-                buff.extend_from_slice(&u16::to_be_bytes(*weight));
-                buff.extend_from_slice(target);
-                buff
-            }
-            Self::CAA {
-                issuer_critical_flag,
-                ref tag,
-                ref value,
-            } => {
-                let mut buff = Vec::with_capacity(2 + tag.len() + value.len());
-                buff.push((*issuer_critical_flag as u8) << 7);
-                buff.push(tag.len() as u8);
-                buff.extend_from_slice(tag.as_bytes());
-                buff.extend_from_slice(&value);
-                buff
-            }
+            Self::SOA(ref soa) => soa.to_bytes(),
+            Self::NULL(ref null) => null.to_bytes(),
+            Self::WKS(ref wks) => wks.to_bytes(),
+            Self::PTR(ref ptr) => ptr.to_bytes(),
+            Self::HINFO(ref hinfo) => hinfo.to_bytes(),
+            Self::MINFO(ref minfo) => minfo.to_bytes(),
+            Self::MX(ref mx) => mx.to_bytes(),
+            Self::TXT(ref txt) => txt.to_bytes(),
+            Self::AAAA(ref aaaa) => aaaa.to_bytes(),
+            Self::LOC(ref loc) => loc.to_bytes(),
+            Self::SRV(ref srv) => srv.to_bytes(),
+            Self::NAPTR(ref naptr) => naptr.to_bytes(),
+            Self::OPT(opt) => opt.to_bytes(),
+            Self::APL(ref apl) => apl.to_bytes(),
+            #[cfg(feature = "dnssec")]
+            Self::DS(ref ds) => ds.to_bytes(),
+            Self::SSHFP(ref sshfp) => sshfp.to_bytes(),
+            Self::IPSECKEY(ref ipseckey) => ipseckey.to_bytes(),
+            #[cfg(feature = "dnssec")]
+            Self::RRSIG(ref rrsig) => rrsig.to_bytes(),
+            #[cfg(feature = "dnssec")]
+            Self::NSEC(ref nsec) => nsec.to_bytes(),
+            #[cfg(feature = "dnssec")]
+            Self::DNSKEY(ref dnskey) => dnskey.to_bytes(),
+            Self::DHCID(ref dhcid) => dhcid.to_bytes(),
+            Self::TLSA(ref tlsa) => tlsa.to_bytes(),
+            Self::HIP(ref hip) => hip.to_bytes(),
+            #[cfg(feature = "dnssec")]
+            Self::CDS(ref ds) => ds.to_bytes(),
+            #[cfg(feature = "dnssec")]
+            Self::CDNSKEY(ref dnskey) => dnskey.to_bytes(),
+            Self::OPENPGPKEY(ref openpgpkey) => openpgpkey.to_bytes(),
+            Self::CSYNC(ref csync) => csync.to_bytes(),
+            Self::SVCB(ref svcb) => svcb.to_bytes(),
+            Self::EUI48(ref eui) => eui.to_bytes(),
+            Self::EUI64(ref eui) => eui.to_bytes(),
+            Self::TKEY(ref tkey) => tkey.to_bytes(),
+            Self::TSIG(ref tsig) => tsig.to_bytes(),
+            Self::URI(ref uri) => uri.to_bytes(),
+            Self::CAA(ref caa) => caa.to_bytes(),
         }
     }
 }
@@ -532,308 +320,49 @@ impl CompressedByteConvertible for RecordData {
         outer_off: usize,
     ) -> Vec<u8> {
         match self {
-            Self::A(ref buffer) => buffer.octets().to_vec(),
+            Self::A(ref a) => a.to_bytes(),
             Self::NS(ref name) => name.to_bytes_compressed(names, outer_off),
             Self::CNAME(ref name) => name.to_bytes_compressed(names, outer_off),
-            Self::SOA {
-                ref mname,
-                ref rname,
-                ref serial,
-                ref refresh,
-                ref retry,
-                ref expire,
-                ref minimum,
-            } => {
-                let mut buffer = Vec::with_capacity(mname.byte_size() + rname.byte_size() + 64);
-                buffer.extend_from_slice(&mname.to_bytes_compressed(names, outer_off));
-                buffer
-                    .extend_from_slice(&rname.to_bytes_compressed(names, outer_off + buffer.len()));
-                buffer.extend_from_slice(&u32::to_be_bytes(*serial));
-                buffer.extend_from_slice(&u32::to_be_bytes(*refresh));
-                buffer.extend_from_slice(&u32::to_be_bytes(*retry));
-                buffer.extend_from_slice(&u32::to_be_bytes(*expire));
-                buffer.extend_from_slice(&u32::to_be_bytes(*minimum));
-                buffer
-            }
-            Self::NULL(ref buffer) => buffer.clone(),
-            Self::WKS {
-                ref address,
-                ref protocol,
-                ref bitmap,
-            } => {
-                let mut buffer = Vec::with_capacity(4 + 1 + bitmap.len());
-                buffer.extend_from_slice(&u32::to_be_bytes(*address));
-                buffer.extend_from_slice(&u8::to_be_bytes(*protocol));
-                buffer.extend_from_slice(&bitmap);
-                buffer
-            }
-            Self::PTR(ref name) => name.to_bytes_compressed(names, outer_off),
-            Self::HINFO { ref cpu, ref os } => {
-                let mut buffer = Vec::with_capacity(2 + cpu.len() + os.len());
-                buffer.push(cpu.len() as u8);
-                buffer.extend_from_slice(&cpu);
-                buffer.push(os.len() as u8);
-                buffer.extend_from_slice(&os);
-                buffer
-            }
-            Self::MINFO {
-                ref rmailbx,
-                ref emailbx,
-            } => {
-                let mut buffer = Vec::with_capacity(rmailbx.byte_size() + emailbx.byte_size());
-                buffer.extend_from_slice(&rmailbx.to_bytes_compressed(names, outer_off));
-                buffer.extend_from_slice(
-                    &emailbx.to_bytes_compressed(names, outer_off + buffer.len()),
-                );
-                buffer
-            }
-            Self::MX {
-                ref preference,
-                ref exchange,
-            } => {
-                let mut buffer = Vec::with_capacity(exchange.byte_size() + 2);
-                buffer.extend_from_slice(&u16::to_be_bytes(*preference));
-                buffer.extend_from_slice(&exchange.to_bytes_compressed(names, outer_off + 2));
-                buffer
-            }
-            Self::TXT(ref store) => store.iter().fold(Vec::new(), |mut buff, elem| {
-                let txt_bin = elem.as_bytes();
-                buff.push(txt_bin.len() as u8);
-                buff.extend_from_slice(txt_bin);
-                buff
-            }),
-            Self::AAAA(ref buffer) => buffer.octets().to_vec(),
-            Self::LOC {
-                ref version,
-                ref size,
-                ref horiz_pre,
-                ref vert_pre,
-                ref latitude,
-                ref longitude,
-                ref altitude,
-            } => {
-                let mut buffer = Vec::with_capacity(16);
-                buffer.push(*version);
-                buffer.push(*size);
-                buffer.push(*horiz_pre);
-                buffer.push(*vert_pre);
-                buffer.extend_from_slice(&u32::to_be_bytes(*latitude));
-                buffer.extend_from_slice(&u32::to_be_bytes(*longitude));
-                buffer.extend_from_slice(&u32::to_be_bytes(*altitude));
-                buffer
-            }
-            Self::SRV {
-                ref priority,
-                ref weight,
-                ref port,
-                ref target,
-            } => {
-                let mut buff = Vec::with_capacity(6 + target.byte_size());
-                buff.extend_from_slice(&u16::to_be_bytes(*priority));
-                buff.extend_from_slice(&u16::to_be_bytes(*weight));
-                buff.extend_from_slice(&u16::to_be_bytes(*port));
-                buff.extend_from_slice(&target.to_bytes_compressed(names, outer_off + 6));
-                buff
-            }
-            Self::NAPTR {
-                order,
-                preference,
-                ref flags,
-                ref services,
-                ref regexp,
-                ref replacement,
-            } => {
-                let mut buff = Vec::with_capacity(self.byte_size());
-                buff.extend_from_slice(&u16::to_be_bytes(*order));
-                buff.extend_from_slice(&u16::to_be_bytes(*preference));
-                buff.push(flags.len() as u8);
-                buff.extend_from_slice(&flags);
-                buff.push(services.len() as u8);
-                buff.extend_from_slice(&services);
-                buff.push(regexp.len() as u8);
-                buff.extend_from_slice(&regexp);
-                buff.extend_from_slice(
-                    &replacement.to_bytes_compressed(names, outer_off + buff.len()),
-                );
-                buff
-            }
-            Self::OPT(kv_data) => {
-                let mut buff = Vec::with_capacity(0);
-                for (code, data) in kv_data.iter() {
-                    buff.extend_from_slice(&u16::to_be_bytes(*code));
-                    buff.extend_from_slice(&u16::to_be_bytes(data.len() as u16));
-                    buff.extend_from_slice(&data);
-                }
-                buff
-            }
-            Self::DS(ds) => ds.to_bytes(),
-            Self::SSHFP {
-                algorithm,
-                fingerprint_type,
-                ref fingerprint,
-            } => {
-                let mut buff = Vec::<u8>::with_capacity(2 + fingerprint.len());
-                buff.push((*algorithm).into());
-                buff.push((*fingerprint_type).into());
-                buff.extend_from_slice(fingerprint);
-                buff
-            }
-            Self::RRSIG(rrsig) => rrsig.to_bytes(),
-            Self::NSEC(nsec) => nsec.to_bytes_compressed(names, outer_off),
-            Self::DNSKKEY(dnskey) => dnskey.to_bytes(),
-            Self::TLSA {
-                cert_usage,
-                selector,
-                matching_type,
-                ref associated_data,
-            } => {
-                let mut buff = Vec::with_capacity(3 + associated_data.len());
-                buff.push((*cert_usage).into());
-                buff.push((*selector).into());
-                buff.push((*matching_type).into());
-                buff.extend_from_slice(associated_data);
-                buff
-            }
-            Self::OPENPGPKEY(data) => data.clone(),
-            Self::EUI48(octets) => octets.to_vec(),
-            Self::EUI64(octets) => octets.to_vec(),
-            Self::URI {
-                priority,
-                weight,
-                ref target,
-            } => {
-                let mut buff = Vec::with_capacity(2 + 2 + target.len());
-                buff.extend_from_slice(&u16::to_be_bytes(*priority));
-                buff.extend_from_slice(&u16::to_be_bytes(*weight));
-                buff.extend_from_slice(target);
-                buff
-            }
-            Self::CAA {
-                issuer_critical_flag,
-                ref tag,
-                ref value,
-            } => {
-                let mut buff = Vec::with_capacity(2 + tag.len() + value.len());
-                buff.push((*issuer_critical_flag as u8) << 7);
-                buff.push(tag.len() as u8);
-                buff.extend_from_slice(tag.as_bytes());
-                buff.extend_from_slice(&value);
-                buff
-            }
-        }
-    }
-}
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub enum SSHFPAlgorithm {
-    Reserved = 0,
-    RSA = 1,
-    DSS = 2,
-}
-
-impl TryFrom<u8> for SSHFPAlgorithm {
-    type Error = DnsError;
-
-    fn try_from(value: u8) -> Result<Self, Self::Error> {
-        match value {
-            0 => Ok(Self::Reserved),
-            1 => Ok(Self::RSA),
-            2 => Ok(Self::DSS),
-            _ => Err(DnsError::InvalidSSHFPAlgorithm(value)),
-        }
-    }
-}
-
-impl From<SSHFPAlgorithm> for u8 {
-    fn from(algorithm: SSHFPAlgorithm) -> Self {
-        match algorithm {
-            SSHFPAlgorithm::Reserved => 0,
-            SSHFPAlgorithm::RSA => 1,
-            SSHFPAlgorithm::DSS => 2,
-        }
-    }
-}
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub enum SSHFPFingerprintType {
-    Reserved = 0,
-    SHA1 = 1,
-}
-
-impl TryFrom<u8> for SSHFPFingerprintType {
-    type Error = DnsError;
-
-    fn try_from(value: u8) -> Result<Self, Self::Error> {
-        match value {
-            0 => Ok(Self::Reserved),
-            1 => Ok(Self::SHA1),
-            _ => Err(DnsError::InvalidSSHFPFingerprintType(value)),
-        }
-    }
-}
-
-impl From<SSHFPFingerprintType> for u8 {
-    fn from(fingerprint_type: SSHFPFingerprintType) -> Self {
-        match fingerprint_type {
-            SSHFPFingerprintType::Reserved => 0,
-            SSHFPFingerprintType::SHA1 => 1,
-        }
-    }
-}
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub enum TLSASelector {
-    Full = 0,
-    SubjectPublicKeyInfo = 1,
-}
-
-impl TryFrom<u8> for TLSASelector {
-    type Error = DnsError;
-
-    fn try_from(value: u8) -> Result<Self, Self::Error> {
-        match value {
-            0 => Ok(Self::Full),
-            1 => Ok(Self::SubjectPublicKeyInfo),
-            _ => Err(DnsError::InvalidSSHFPAlgorithm(value)),
-        }
-    }
-}
-
-impl From<TLSASelector> for u8 {
-    fn from(selector: TLSASelector) -> Self {
-        match selector {
-            TLSASelector::Full => 0,
-            TLSASelector::SubjectPublicKeyInfo => 1,
-        }
-    }
-}
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub enum TLSAMatchingType {
-    ExactMatch = 0,
-    SHA256 = 1,
-    SHA512 = 2,
-}
-
-impl TryFrom<u8> for TLSAMatchingType {
-    type Error = DnsError;
-
-    fn try_from(value: u8) -> Result<Self, Self::Error> {
-        match value {
-            0 => Ok(Self::ExactMatch),
-            1 => Ok(Self::SHA256),
-            2 => Ok(Self::SHA512),
-            _ => Err(DnsError::InvalidSSHFPAlgorithm(value)),
-        }
-    }
-}
-
-impl From<TLSAMatchingType> for u8 {
-    fn from(matching_type: TLSAMatchingType) -> Self {
-        match matching_type {
-            TLSAMatchingType::ExactMatch => 0,
-            TLSAMatchingType::SHA256 => 1,
-            TLSAMatchingType::SHA512 => 2,
+            Self::SOA(ref soa) => soa.to_bytes_compressed(names, outer_off),
+            Self::NULL(ref null) => null.to_bytes(),
+            Self::WKS(ref wks) => wks.to_bytes(),
+            Self::PTR(ref ptr) => ptr.to_bytes_compressed(names, outer_off),
+            Self::HINFO(ref hinfo) => hinfo.to_bytes(),
+            Self::MINFO(ref minfo) => minfo.to_bytes_compressed(names, outer_off),
+            Self::MX(ref mx) => mx.to_bytes_compressed(names, outer_off),
+            Self::TXT(ref txt) => txt.to_bytes(),
+            Self::AAAA(ref aaaa) => aaaa.to_bytes(),
+            Self::LOC(ref loc) => loc.to_bytes(),
+            Self::SRV(ref srv) => srv.to_bytes_compressed(names, outer_off),
+            Self::NAPTR(ref naptr) => naptr.to_bytes_compressed(names, outer_off),
+            Self::OPT(opt) => opt.to_bytes(),
+            Self::APL(ref apl) => apl.to_bytes(),
+            #[cfg(feature = "dnssec")]
+            Self::DS(ref ds) => ds.to_bytes(),
+            Self::SSHFP(ref sshfp) => sshfp.to_bytes(),
+            Self::IPSECKEY(ref ipseckey) => ipseckey.to_bytes(),
+            #[cfg(feature = "dnssec")]
+            Self::RRSIG(ref rrsig) => rrsig.to_bytes(),
+            #[cfg(feature = "dnssec")]
+            Self::NSEC(ref nsec) => nsec.to_bytes_compressed(names, outer_off),
+            #[cfg(feature = "dnssec")]
+            Self::DNSKEY(ref dnskey) => dnskey.to_bytes(),
+            Self::DHCID(ref dhcid) => dhcid.to_bytes(),
+            Self::TLSA(ref tlsa) => tlsa.to_bytes(),
+            Self::HIP(ref hip) => hip.to_bytes(),
+            #[cfg(feature = "dnssec")]
+            Self::CDS(ref ds) => ds.to_bytes(),
+            #[cfg(feature = "dnssec")]
+            Self::CDNSKEY(ref dnskey) => dnskey.to_bytes(),
+            Self::OPENPGPKEY(ref openpgpkey) => openpgpkey.to_bytes(),
+            Self::CSYNC(ref csync) => csync.to_bytes(),
+            Self::SVCB(ref svcb) => svcb.to_bytes(),
+            Self::EUI48(ref eui) => eui.to_bytes(),
+            Self::EUI64(ref eui) => eui.to_bytes(),
+            Self::TKEY(ref tkey) => tkey.to_bytes(),
+            Self::TSIG(ref tsig) => tsig.to_bytes(),
+            Self::URI(ref uri) => uri.to_bytes(),
+            Self::CAA(ref caa) => caa.to_bytes(),
         }
     }
 }
