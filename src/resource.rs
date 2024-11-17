@@ -8,12 +8,18 @@ use crate::error::DnsError;
 use crate::fqdn::FQDN;
 use crate::rdata::RecordData;
 
+/// Class types for resource records.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum RecordClass {
+    /// Internet
     IN,
+    /// CSNET (obsolete - used only for examples in obsolete RFCs)
     CS,
+    /// CHAOS
     CH,
+    /// Hesiod
     HS,
+    /// The payload size of OPT pseudo records is stored in the class field of such records.
     UdpPayloadSize(u16), // RFC 6891 eDNS OPT pseudo record
 }
 
@@ -52,6 +58,9 @@ impl ByteConvertible for RecordClass {
     }
 }
 
+/// Type field for resource records.
+/// This indicates which record type is stored in the record data section of the record.
+/// Each `RecordType` corresponds with a type in `crate::rdata`
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum RecordType {
     A = 1,      // RFC 1035
@@ -258,18 +267,29 @@ impl ByteConvertible for RecordType {
     }
 }
 
+/// TODO
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ResourceRecord {
+    /// Domain name that represents the owner of the name of the node to which the resource
+    /// record belongs.
     pub(super) a_name: FQDN,
+    /// Type of the resource record.
     pub(super) a_type: RecordType,
+    /// Bitflag to indicate if the cache should be flushed. Only valid for mDNS
     #[cfg(feature = "mdns")]
     pub(super) cache_flush: bool,
+    /// Class of the resource record.
     pub(super) a_class: RecordClass,
+    /// Specifies the time interval that the resource record may be cached before the source
+    /// of the information should be consulted again. Zero means the resource record should not
+    /// be cached at all.
     pub(super) time_to_live: u32,
+    /// Data of the resource. The type is specified by the field `a_type`.
     pub(super) rdata: RecordData,
 }
 
 impl ResourceRecord {
+    /// Create a new instance of `ResourceRecord`.
     pub fn new(
         a_name: FQDN,
         a_type: RecordType,
@@ -372,7 +392,7 @@ impl<'a> TryFrom<&mut DnsBuffer<'a>> for ResourceRecord {
         let mut rdata_buffer = buffer.sub_buffer(data_len as usize)?;
         let rdata = RecordData::from(a_type, &mut rdata_buffer)?;
 
-        buffer.advance(data_len as usize);
+        buffer.advance(data_len as usize)?;
 
         Ok(ResourceRecord {
             a_name,

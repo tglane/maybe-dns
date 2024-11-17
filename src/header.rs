@@ -7,25 +7,55 @@ use crate::buffer::DnsBuffer;
 use crate::byteconvertible::{ByteConvertible, CompressedByteConvertible};
 use crate::error::DnsError;
 
+/// Header section of a packet is always present and includes fields that specify
+/// which of the remaining sections are present, and also specifiy wether the
+/// message is a query or a reponse to some query or something else.
+/// Contains the configuration of the message data.
+///
+/// The wire-format of a header has the following representation:
+///                                   1  1  1  1  1  1
+///     0  1  2  3  4  5  6  7  8  9  0  1  2  3  4  5
+///     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+///     |                      ID                       |
+///     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+///     |QR|   Opcode  |AA|TC|RD|RA|   Z    |   RCODE   |
+///     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+///     |                    QDCOUNT                    |
+///     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+///     |                    ANCOUNT                    |
+///     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+///     |                    NSCOUNT                    |
+///     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+///     |                    ARCOUNT                    |
+///     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+///
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Header {
+    /// The identification field is used to match responses with queries.
     pub(super) id: u16,
 
+    /// Various flags to configure a dns packet.
     flags: FlagBitfield,
 
+    /// Number of question records in the dns packet.
     pub(super) ques_count: u16,
+
+    /// Number of answer records in the dns packet.
     pub(super) ans_count: u16,
+
+    /// Number of authority records in the dns packet.
     pub(super) auth_count: u16,
+
+    /// Number of additional records in the dns packet.
     pub(super) add_count: u16,
 }
 
 impl Header {
+    /// The number of bytes to represent a dns header.
     pub(super) const SIZE: usize = size_of::<Self>();
 
-    pub fn new() -> Self {
-        Self::default()
-    }
-
+    /// Create a new header for a query dns packet.
+    /// This sets the necessary flags to make it a query dns packet. Other fields remain defaulted.
     pub fn new_query(id: u16, recursion_desired: bool) -> Self {
         let flags = FlagBitfield::new()
             .with_opcode(OpCode::StandardQuery as u8)
@@ -41,6 +71,8 @@ impl Header {
         }
     }
 
+    /// Create a new header for a reply dns packet.
+    /// This sets the necessary flags to make it a reply dns packet. Other fields remain defaulted.
     pub fn new_reply(id: u16, opcode: OpCode) -> Self {
         let flags = FlagBitfield::new().with_opcode(opcode as u8).with_qr(1);
         Self {
@@ -182,6 +214,7 @@ impl<'a> TryFrom<&mut DnsBuffer<'a>> for Header {
     }
 }
 
+/// Representation of the bitflags that are present in the header of a dns packet.
 #[bitfield]
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct FlagBitfield {
@@ -206,12 +239,17 @@ pub struct FlagBitfield {
     ra: B1,
 }
 
+/// Enum representation of the operation modes a dns packet can be set to.
 #[repr(u8)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub enum OpCode {
+    /// Standard query requests.
     StandardQuery = 0,
+    /// Inverse query lookup.
     InverseQuery = 1,
+    /// Status request by a server.
     ServerStatusRequest = 2,
+    /// Reserved for future use.
     Reserved,
 }
 
@@ -226,27 +264,46 @@ impl From<u8> for OpCode {
     }
 }
 
+/// Set for dns response packets to indicate the status of the request.
 #[repr(u8)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub enum ResponseCode {
+    /// No error condition.
     NoError = 0,
+
+    /// The name server was unable to interpret the query.
     FormatError = 1,
+
+    /// The name server was unable to process this query due to a problem with the name server.
     ServerFailure = 2,
+
+    /// Meaningful only for responses from an authoritative name server, this code signifies that
+    /// the domain name referenced in the query does not exist.
     NameError = 3,
+
+    /// Not Implemented - The name server does not support the requested kind of query.
     NotImplemented = 4,
+
+    /// The name server refuses to perform the specified operation for policy reasons. For example,
+    /// a name server may not wish to provide the information to the particular requester, or a
+    /// name server may not wish to perform a particular operation (e.g., zone transfer) for
+    /// particular data.
     Refused = 5,
+
+    /// Some name that ought not to exist, does exist.
     YXDomain = 6,
+
+    /// Some RRset taht ought not to exist, does exist.
     YXRRSet = 7,
+
+    /// Some RRSet taht ought to exist, does not exist.
     NXRRSet = 8,
+
+    /// Server not authoritative for the zone.
     NotAuth = 9,
+
+    /// Name not in zone.
     NotZone = 10,
-    BadSig = 16,
-    BadKey = 17,
-    BadTime = 18,
-    BadMode = 19,
-    BadName = 20,
-    BadAlg = 21,
-    BadTrunc = 22,
 }
 
 impl TryFrom<u8> for ResponseCode {
@@ -265,12 +322,6 @@ impl TryFrom<u8> for ResponseCode {
             8 => Ok(ResponseCode::NXRRSet),
             9 => Ok(ResponseCode::NotAuth),
             10 => Ok(ResponseCode::NotZone),
-            17 => Ok(ResponseCode::BadKey),
-            18 => Ok(ResponseCode::BadTime),
-            19 => Ok(ResponseCode::BadMode),
-            20 => Ok(ResponseCode::BadName),
-            21 => Ok(ResponseCode::BadAlg),
-            22 => Ok(ResponseCode::BadTrunc),
             _ => Err(DnsError::InvalidResponseCode(code)),
         }
     }

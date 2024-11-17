@@ -73,12 +73,19 @@ pub use self::txt::Txt;
 pub use self::uri::Uri;
 pub use self::wks::Wks;
 
+/// This trait is implemented by all record data types in this crate to get
+/// the type and to transfer it into a wrapping enum `RecordData`.
 pub trait RData {
+    /// Get the individual `RecordType` that is associated with a record
+    /// data type.
     fn record_type(&self) -> RecordType;
 
+    /// Transform this record data type into the subsequent enum `RecordData`.
     fn into_record_data(self) -> RecordData;
 }
 
+/// Enum to represent all available hashing algorithms that are supported by
+/// the DNS record data types.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Algorithm {
     Reserved,
@@ -118,6 +125,7 @@ impl From<Algorithm> for u8 {
     }
 }
 
+/// Enum with a variant for each supported record data type.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RecordData {
     A(A),
@@ -166,6 +174,8 @@ pub enum RecordData {
 }
 
 impl RecordData {
+    /// Extract a instance of `RecordData` from the given buffer where its variant is
+    /// determined by the input parameter `rec_type` of type `RecordType`.
     pub fn from(rec_type: RecordType, buffer: &mut DnsBuffer) -> Result<Self, DnsError> {
         Ok(match rec_type {
             RecordType::A => Self::A(A::try_from(buffer)?),

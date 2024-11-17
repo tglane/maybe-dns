@@ -7,16 +7,23 @@ use crate::byteconvertible::{ByteConvertible, CompressedByteConvertible};
 use crate::error::DnsError;
 use crate::fqdn::FQDN;
 
+/// Class type for question sections of dns packets. This is a superset of `RecordClass` with some
+/// additional values specifically for question records.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum QClass {
     // General RecordClass classes
+    /// Internet
     IN = 1,
+    /// CSNET (obsolete - used only for examples in obsolete RFCs)
     CS = 2,
+    /// CHAOS
     CH = 3,
+    /// Hesiod
     HS = 4,
 
     // Unique class for Question records
     NONE = 254,
+    /// Matches any type.
     ANY = 255,
 }
 
@@ -60,23 +67,55 @@ impl ByteConvertible for QClass {
     }
 }
 
+/// Type field for question records. This is a superset of `RecordClass`.
+/// This indicates which record type is stored in the record data section of the record.
+/// Each `QType` corresponds with a type in `crate::rdata`
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum QType {
     // General RecordType types
-    A = 1,
-    NS = 2,
-    CNAME = 5,
-    SOA = 6,
-    NULL = 10,
-    WKS = 11,
-    PTR = 12,
-    HINFO = 13,
-    MINFO = 14,
-    MX = 15,
-    TXT = 16,
-    AAAA = 28,
-    SRV = 33,
-    NSEC = 47,
+    A = 1,      // RFC 1035
+    NS = 2,     // RFC 1035
+    CNAME = 5,  // RFC 1035
+    SOA = 6,    // RFC 1035
+    NULL = 10,  // RFC 1035
+    WKS = 11,   // RFC 1035
+    PTR = 12,   // RFC 1035
+    HINFO = 13, // RFC 1035
+    MINFO = 14, // RFC 1035
+    MX = 15,    // RFC 1035
+    TXT = 16,   // RFC 1035
+    AAAA = 28,  // RFC 3596
+    LOC = 29,   // RFC 1876
+    SRV = 33,   // RFC 2782
+    NAPTR = 35, // RFC 3404
+    OPT = 41,   // RFC 6891
+    APL = 42,   // RFC 3123
+    #[cfg(feature = "dnssec")]
+    DS = 43, // RFC 4034
+    SSHFP = 44, // RFC 4255
+    IPSECKEY = 45, // RFC 4025
+    #[cfg(feature = "dnssec")]
+    RRSIG = 46, // RFC 4034
+    #[cfg(feature = "dnssec")]
+    NSEC = 47, // RFC 4034
+    #[cfg(feature = "dnssec")]
+    DNSKEY = 48, // RFC 4034
+    DHCID = 49, // RFC 4701
+    TLSA = 52,  // RFC 6698
+    HIP = 55,   // RFC 8005
+    #[cfg(feature = "dnssec")]
+    CDS = 59, // RFC 7344
+    #[cfg(feature = "dnssec")]
+    CDNSKEY = 60, // RFC 7344
+    OPENPGPKEY = 61, // RFC 7929
+    CSYNC = 62, // RFC 7477
+    SVCB = 64,  // RFC 9460
+    EUI48 = 108, // RFC 7043
+    EUI64 = 109, // RFC 7043
+    TKEY = 249, // RFC 2930
+    TSIG = 250, // RFC 8945
+    URI = 256,  // RFC 7553
+    CAA = 257,  // RFC 8659
 
     // Unique types for Question records
     AXFR = 252,
@@ -102,8 +141,34 @@ impl TryFrom<u16> for QType {
             15 => Ok(Self::MX),
             16 => Ok(Self::TXT),
             28 => Ok(Self::AAAA),
+            29 => Ok(Self::LOC),
             33 => Ok(Self::SRV),
+            35 => Ok(Self::NAPTR),
+            41 => Ok(Self::OPT),
+            42 => Ok(Self::APL),
+            #[cfg(feature = "dnssec")]
+            43 => Ok(Self::DS),
+            44 => Ok(Self::SSHFP),
+            45 => Ok(Self::IPSECKEY),
+            #[cfg(feature = "dnssec")]
+            46 => Ok(Self::RRSIG),
+            #[cfg(feature = "dnssec")]
             47 => Ok(Self::NSEC),
+            #[cfg(feature = "dnssec")]
+            48 => Ok(Self::DNSKEY),
+            49 => Ok(Self::DHCID),
+            52 => Ok(Self::TLSA),
+            55 => Ok(Self::HIP),
+            61 => Ok(Self::OPENPGPKEY),
+            62 => Ok(Self::CSYNC),
+            64 => Ok(Self::SVCB),
+            108 => Ok(Self::EUI48),
+            109 => Ok(Self::EUI64),
+            249 => Ok(Self::TKEY),
+            250 => Ok(Self::TSIG),
+            256 => Ok(Self::URI),
+            257 => Ok(Self::CAA),
+
             252 => Ok(Self::AXFR),
             253 => Ok(Self::MAILB),
             254 => Ok(Self::MAILA),
@@ -128,8 +193,38 @@ impl From<QType> for u16 {
             QType::MX => 15,
             QType::TXT => 16,
             QType::AAAA => 28,
+            QType::LOC => 29,
             QType::SRV => 33,
+            QType::NAPTR => 35,
+            QType::OPT => 41,
+            QType::APL => 42,
+            #[cfg(feature = "dnssec")]
+            QType::DS => 43,
+            QType::SSHFP => 44,
+            QType::IPSECKEY => 45,
+            #[cfg(feature = "dnssec")]
+            QType::RRSIG => 46,
+            #[cfg(feature = "dnssec")]
             QType::NSEC => 47,
+            #[cfg(feature = "dnssec")]
+            QType::DNSKEY => 48,
+            QType::DHCID => 49,
+            QType::TLSA => 52,
+            QType::HIP => 55,
+            #[cfg(feature = "dnssec")]
+            QType::CDS => 59,
+            #[cfg(feature = "dnssec")]
+            QType::CDNSKEY => 60,
+            QType::OPENPGPKEY => 61,
+            QType::CSYNC => 62,
+            QType::SVCB => 64,
+            QType::EUI48 => 108,
+            QType::EUI64 => 109,
+            QType::TKEY => 249,
+            QType::TSIG => 250,
+            QType::URI => 256,
+            QType::CAA => 257,
+
             QType::AXFR => 252,
             QType::MAILB => 253,
             QType::MAILA => 254,
@@ -148,16 +243,22 @@ impl ByteConvertible for QType {
     }
 }
 
+/// Describes a question to a name server that is stored in the questions array of a dns packet.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Question {
+    /// A domain name of the requested resource.
     pub(super) q_name: FQDN,
+    /// Type of the record data of the expected response.
     pub(super) q_type: QType,
+    /// Class of the record of the expected response.
     pub(super) q_class: QClass,
+    /// States if the question requires only unicast responses. This is only valid for mDNS requets.
     #[cfg(feature = "mdns")]
     pub(super) unicast_response: bool,
 }
 
 impl Question {
+    /// Create a new `Question` instance with a given domain name, type and class.
     pub fn new(q_name: FQDN, q_type: QType, q_class: QClass) -> Self {
         Question {
             q_name,

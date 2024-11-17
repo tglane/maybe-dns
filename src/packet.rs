@@ -7,20 +7,48 @@ use crate::header::{Header, OpCode, ResponseCode};
 use crate::question::Question;
 use crate::resource::ResourceRecord;
 
+/// Represents a complete DNS packet/message.
+/// A message is divided into five sections, some of which are empty in certain cases.
+///
+/// In wire-format a packet has the following representation:
+///     +---------------------+
+///     |        Header       |
+///     +---------------------+
+///     |       Question      | the question for the name server
+///     +---------------------+
+///     |        Answer       | RRs answering the question
+///     +---------------------+
+///     |      Authority      | RRs pointing toward an authority
+///     +---------------------+
+///     |      Additional     | RRs holding additional information
+///     +---------------------+
+///
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Packet {
+    /// Header section of a packet is always present and includes fields that specify
+    /// which of the remaining sections are present, and also specifiy wether the
+    /// message is a query or a reponse to some query or something else.
+    /// Contains the configuration of the message data.
     header: Header,
+
+    /// Contains fields that each describe a question to a name server.
     questions: Vec<Question>,
+
+    /// Contains resource records that answer the questions.
     answers: Vec<ResourceRecord>,
+
+    /// Contains resource records that point toward a authoritative name server.
     authorities: Vec<ResourceRecord>,
+
+    /// Contains resource records which relate to the query, but are not strictly
+    /// anwsers for the questions.
     additional: Vec<ResourceRecord>,
 }
 
 impl Packet {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
+    /// Create a new packet configured as a dns query.
+    /// This sets the necessary flags to make it a query dns packet. Other fields remain defaulted.
+    /// This should only be used to query information from a name server.
     pub fn new_query(id: u16, recursion_desired: bool) -> Self {
         Packet {
             header: Header::new_query(id, recursion_desired),
@@ -31,6 +59,9 @@ impl Packet {
         }
     }
 
+    /// Create a new packet configured as a dns reply.
+    /// This sets the necessary flags to make it a reply dns packet. Other fields remain defaulted.
+    /// This should only be used to answer dns queries.
     pub fn new_reply(id: u16) -> Self {
         Self {
             header: Header::new_reply(id, OpCode::StandardQuery),
@@ -41,6 +72,9 @@ impl Packet {
         }
     }
 
+    /// Create a new packet configured as a dns query preoccupied with a list of `Questions`.
+    /// This sets the necessary flags to make it a query dns packet. Other fields remain defaulted.
+    /// This should only be used to query information from a name server.
     pub fn with_questions(id: u16, rc: bool, questions: Vec<Question>) -> Self {
         Packet {
             header: Header::new_query(id, rc),
@@ -204,6 +238,7 @@ impl Packet {
         self.header.add_count = self.additional.len() as u16;
     }
 
+    /// Creates a binary representation of a `Packet` with DNS compression enabled.
     pub fn to_bytes_compressed(&self) -> Vec<u8> {
         let mut used_fqdn = std::collections::HashMap::<u64, usize>::new();
 
@@ -308,7 +343,7 @@ impl<'a> TryFrom<&mut DnsBuffer<'a>> for Packet {
     type Error = DnsError;
 
     fn try_from(buffer: &mut DnsBuffer<'a>) -> Result<Self, Self::Error> {
-        let mut packet = Packet::new();
+        let mut packet = Packet::default();
 
         packet.set_header(Header::try_from(buffer as &mut _)?);
 

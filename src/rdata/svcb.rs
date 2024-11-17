@@ -59,7 +59,7 @@ impl<'a> TryFrom<&mut DnsBuffer<'a>> for Svcb {
                 params.insert(Param::try_from(&mut remaining)?);
                 remaining.position()
             };
-            buffer.set_position(new_pos);
+            buffer.set_position(new_pos)?;
         }
 
         Ok(Self {

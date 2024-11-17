@@ -4,12 +4,26 @@ use crate::rdata::RecordData;
 use crate::resource::RecordClass;
 use crate::resource::RecordType;
 
+/// All DNS information is composed of so-called Resource Record Sets (RRsets). An RRset is the
+/// set of all Resource Records of a given record type for a given name.
+/// This representation of a RRset is non-owning, which means that the resource records that are
+/// part of this set are not actually owned by the set itself but only referenced.
 #[derive(Clone, Debug)]
 pub struct ResourceRecordSet<'a> {
+    /// Domain name of the zone to which the RRset belongs.
     name: &'a FQDN,
+
+    /// Type of the managed resource records.
     set_type: RecordType,
+
+    /// Class of the managed resource records.
     set_class: RecordClass,
+
+    /// Time to live which indicates for how long resolvers may cache this RRset.
+    /// Measured in seconds.
     ttl: u32,
+
+    /// Array of non-owned resource records that are in the set.
     records: Vec<&'a RecordData>,
 }
 

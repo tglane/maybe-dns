@@ -1,3 +1,10 @@
+/// Generates a hash from a fully-qualified domain name (FQDN).
+///
+/// Use case:
+/// This is used internally to for DNS compression agorithm. When serializing a DNS packet, a
+/// hash of any occuring FQDN is added in order of occurence into a hashmap. When another FQDN
+/// gets serialized, we can check for previous occurences by simple table lookup to create a
+/// pointer.
 pub(super) fn hash_fqdn(fqdn: &[Vec<u8>]) -> u64 {
     use std::hash::{Hash, Hasher};
 
@@ -17,5 +24,5 @@ mod tests {
 
         assert_eq!(hash_fqdn(&a), hash_fqdn(&b));
         assert_eq!(hash_fqdn(&b), hash_fqdn(&a));
-    } 
+    }
 }

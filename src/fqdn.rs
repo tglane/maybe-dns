@@ -8,6 +8,12 @@ use crate::error::DnsError;
 use crate::util::hash_fqdn;
 use crate::COMPRESSION_MASK_U16;
 
+// struct Label<'a> {
+//     data: &'a [u8],
+// }
+
+/// FQDN represents a fully-qualified domain name which is represented by a series
+/// of labels and is terminated by a zero-length label at the end.
 #[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub struct FQDN {
     // TODO: Store data in a flattend representation (Vec<u8> instead of Vec<Vec<u8>>)
@@ -15,6 +21,8 @@ pub struct FQDN {
 }
 
 impl FQDN {
+    /// Create a new ´FQDN` instance from a string representation of a fully-qualified domain
+    /// name (e.g. "_googlecast.tcp._local")
     pub fn new(name: &str) -> Self {
         Self {
             data: name
@@ -25,42 +33,52 @@ impl FQDN {
         }
     }
 
+    /// Checks if the FQDN does not contain any labels.
     pub fn is_empty(&self) -> bool {
         self.byte_size() == 0
     }
 
+    /// Returns the byte-size of this FQDN in its binary representation.
     pub fn len(&self) -> usize {
         self.byte_size()
     }
 
+    /// Returns the number of labels in the FQND.
     pub fn label_count(&self) -> u8 {
         self.data.len() as u8
     }
 
+    /// Returns an iterator over the labels of the FQDN.
     pub fn iter(&self) -> std::slice::Iter<Vec<u8>> {
         self.data.iter()
     }
 
+    /// Returns a mutable iterator over the labels of the FQDN.
     pub fn iter_mut(&mut self) -> std::slice::IterMut<Vec<u8>> {
         self.data.iter_mut()
     }
 
+    /// Checks of the last label lable of the FQDN matches `.local`
     pub fn is_link_local(&self) -> bool {
         // Check if the fqdn ends with .local(.)
         // This indicates a special, local-only top level domain
-        if let Some(tld) = self.data.last() {
-            if let Ok(tld) = std::str::from_utf8(tld.as_slice()) {
-                return tld == "local";
-            }
+        if let Some(Ok(tld)) = self
+            .data
+            .last()
+            .map(|bytes| std::str::from_utf8(bytes.as_slice()))
+        {
+            return tld == "local";
         }
         false
     }
 
+    /// Checks if the FQDN contains a single lable `.`.
     pub fn is_root(&self) -> bool {
         // Root simply means "" or "." as fully-qualified domain name
         self.is_empty() || self.data.iter().all(|sub| sub.is_empty())
     }
 
+    /// Appends a new label to the end of this FQDN.
     pub fn append_label(&mut self, name: &str) {
         self.data.push(name.as_bytes().to_vec());
     }

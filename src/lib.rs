@@ -180,7 +180,7 @@ mod tests {
 
     #[test]
     fn build_query_correct() {
-        let mut query = Packet::new();
+        let mut query = Packet::default();
         query.add_question(Question::new(
             FQDN::new("_srv._udp.local"),
             QType::TXT,
@@ -324,7 +324,7 @@ mod tests {
     fn build_complex_reply_google_com() {
         let mut reply = Packet::new_reply(3);
 
-        let mut header = Header::new();
+        let mut header = Header::default();
         header.id = 0xD5AD;
         header.set_opcode(OpCode::StandardQuery);
         header.set_response_code(ResponseCode::NoError);
