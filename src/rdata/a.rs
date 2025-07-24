@@ -10,7 +10,25 @@ use crate::rdata::{RData, RecordData, RecordType};
 /// four decimal numbers separated by dots without any imbedded spaces (e.g., "10.2.0.52"
 /// or "192.0.5.6").
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct A(pub Ipv4Addr);
+pub struct A(Ipv4Addr);
+
+impl A {
+    pub fn new(addr: Ipv4Addr) -> Self {
+        Self(addr)
+    }
+
+    pub fn inner(&self) -> &Ipv4Addr {
+        &self.0
+    }
+
+    pub fn inner_mut(&mut self) -> &mut Ipv4Addr {
+        &mut self.0
+    }
+
+    pub fn into_inner(self) -> Ipv4Addr {
+        self.0
+    }
+}
 
 impl<'a> TryFrom<&mut DnsBuffer<'a>> for A {
     type Error = DnsError;

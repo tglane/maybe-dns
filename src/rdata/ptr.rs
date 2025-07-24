@@ -13,13 +13,23 @@ use crate::rdata::{RData, RecordData, RecordType};
 /// similar to that performed by CNAME, which identifies aliases.  See the
 /// description of the IN-ADDR.ARPA domain for an example.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Ptr {
-    pub ptr_dname: FQDN,
-}
+pub struct Ptr(FQDN);
 
 impl Ptr {
     pub fn new(ptr_dname: FQDN) -> Self {
-        Self { ptr_dname }
+        Self(ptr_dname)
+    }
+
+    pub fn inner(&self) -> &FQDN {
+        &self.0
+    }
+
+    pub fn inner_mut(&mut self) -> &mut FQDN {
+        &mut self.0
+    }
+
+    pub fn into_inner(self) -> FQDN {
+        self.0
     }
 }
 
@@ -27,9 +37,7 @@ impl<'a> TryFrom<&mut DnsBuffer<'a>> for Ptr {
     type Error = DnsError;
 
     fn try_from(buffer: &mut DnsBuffer<'a>) -> Result<Self, Self::Error> {
-        Ok(Self {
-            ptr_dname: buffer.extract_fqdn()?,
-        })
+        Ok(Self(buffer.extract_fqdn()?))
     }
 }
 
@@ -45,20 +53,20 @@ impl RData for Ptr {
 
 impl ByteConvertible for Ptr {
     fn byte_size(&self) -> usize {
-        self.ptr_dname.byte_size()
+        self.0.byte_size()
     }
 
     fn to_bytes(&self) -> Vec<u8> {
-        self.ptr_dname.to_bytes()
+        self.0.to_bytes()
     }
 }
 
 impl CompressedByteConvertible for Ptr {
     fn byte_size_compressed(&self, names: &mut HashMap<u64, usize>, offset: usize) -> usize {
-        self.ptr_dname.byte_size_compressed(names, offset)
+        self.0.byte_size_compressed(names, offset)
     }
 
     fn to_bytes_compressed(&self, names: &mut HashMap<u64, usize>, offset: usize) -> Vec<u8> {
-        self.ptr_dname.to_bytes_compressed(names, offset)
+        self.0.to_bytes_compressed(names, offset)
     }
 }

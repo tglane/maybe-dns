@@ -354,6 +354,14 @@ impl ResourceRecord {
         &self.rdata
     }
 
+    pub fn data_mut(&mut self) -> &mut RecordData {
+        &mut self.rdata
+    }
+
+    pub fn take_data(self) -> RecordData {
+        self.rdata
+    }
+
     pub fn set_data(&mut self, data: RecordData) {
         self.rdata = data;
     }

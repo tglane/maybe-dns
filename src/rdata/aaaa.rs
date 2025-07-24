@@ -12,7 +12,25 @@ use crate::rdata::{RData, RecordData, RecordType};
 /// class that stores a single IPv6 address.
 /// The IANA assigned value of the type is 28 (decimal).
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Aaaa(pub Ipv6Addr);
+pub struct Aaaa(Ipv6Addr);
+
+impl Aaaa {
+    pub fn new(addr: Ipv6Addr) -> Self {
+        Self(addr)
+    }
+
+    pub fn inner(&self) -> &Ipv6Addr {
+        &self.0
+    }
+
+    pub fn inner_mut(&mut self) -> &mut Ipv6Addr {
+        &mut self.0
+    }
+
+    pub fn into_inner(self) -> Ipv6Addr {
+        self.0
+    }
+}
 
 impl<'a> TryFrom<&mut DnsBuffer<'a>> for Aaaa {
     type Error = DnsError;
